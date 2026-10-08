@@ -2,7 +2,7 @@
 
 #define MyAppName "cheesestrap"
 ; keep this in sync with Cargo.toml, they are bumped together
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppExe "Cheesestrap.exe"
 
 [Setup]
@@ -44,7 +44,10 @@ Type: files; Name: "{app}\settings.json"
 Name: desktopicon; Description: "Create a &desktop icon"; Flags: unchecked
 
 [Run]
-Filename: "{app}\{#MyAppExe}"; Description: "Launch cheesestrap"; Flags: nowait postinstall skipifsilent shellexec; Verb: runas
+; The self update runs this silently, and skipifsilent would have swallowed
+; the relaunch, so the app would stay closed after updating. No runas verb
+; either, the installer is already elevated and it would only add a prompt.
+Filename: "{app}\{#MyAppExe}"; Description: "Launch cheesestrap"; Flags: nowait runascurrentuser
 
 [Code]
 function ProtoPointsToUs(const Proto: String): Boolean;

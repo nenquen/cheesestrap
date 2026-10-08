@@ -55,6 +55,13 @@ pub fn draw(f: &mut Frame, app: &mut App, hot: &mut Vec<HotZone>) {
         area,
     );
 
+    // while the update box is up it owns the whole window. drawing the panels
+    // underneath would peek out around it and look like a half open dialog.
+    if app.updating || app.update.is_some() {
+        draw_notice(f, app, area, hot);
+        return;
+    }
+
     if app.using_keyboard && !app.editing_args && app.show_hints {
         let rows = Layout::default()
             .direction(Direction::Vertical)
@@ -73,26 +80,21 @@ pub fn draw(f: &mut Frame, app: &mut App, hot: &mut Vec<HotZone>) {
     } else {
         draw_main(f, app, area, hot);
     }
-
-    draw_notice(f, app, area, hot);
 }
 
-/// The update popup. Sits on top of everything, updates and later on the
-/// bottom row, and doubles as the progress display once update is pressed.
+/// The update screen. While it is up nothing else is drawn, so it gets the
+/// whole window. It also doubles as the progress display once update is
+/// pressed. Button row is update / later, update is the default.
 fn draw_notice(
     f: &mut Frame,
     app: &mut App,
     area: ratatui::layout::Rect,
     hot: &mut Vec<HotZone>,
 ) {
-    let show = app.updating || app.update.is_some();
     app.notice_rect = None;
-    if !show {
-        return;
-    }
 
-    let w = (area.width as usize - 8).clamp(40, 60) as u16;
-    let h: u16 = if app.updating { 6 } else { 9 };
+    let w = (area.width as usize - 10).clamp(46, 64) as u16;
+    let h: u16 = if app.updating { 9 } else { 12 };
     let rect = ratatui::layout::Rect::new(
         area.x + (area.width.saturating_sub(w)) / 2,
         area.y + (area.height.saturating_sub(h)) / 2,
@@ -106,35 +108,30 @@ fn draw_notice(
 
     if app.updating {
         let pct = app.update_pct;
-        // the logo is painted by egui over the first row, so leave it room
+        // egui paints the logo over the left of this row, keep it clear
         lines.push(Line::from(vec![
-            Span::styled(format!("  {}   ", " ".repeat(4)), Style::default().fg(DIM)),
+            Span::styled("        ", Style::default().fg(DIM)),
             Span::styled(
                 "updating",
                 Style::default().fg(CHEESE).add_modifier(Modifier::BOLD),
             ),
         ]));
         lines.push(Line::from(""));
-        // a plain bar, block glyphs stay inside the ascii range ratatui draws
+        lines.push(Line::from(vec![Span::styled(
+            "  downloading and installing, this window closes on its own.",
+            Style::default().fg(CREAM),
+        )]));
+        lines.push(Line::from(""));
         let bar_w = inner_w.saturating_sub(10).max(4);
         let filled = (bar_w as usize * pct as usize / 100).min(bar_w as usize);
-        let mut bar = String::new();
-        for i in 0..bar_w {
-            bar.push(if (i as usize) < filled { '#' } else { '.' });
-        }
+        let bar: String = (0..bar_w)
+            .map(|i| if i < filled { '#' } else { '.' })
+            .collect();
         lines.push(Line::from(vec![
             Span::styled(format!("  {bar}  "), Style::default().fg(CHEESE)),
             Span::styled(format!("{pct:>3}%"), Style::default().fg(GOOD)),
         ]));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "  the setup will close this window and take over.",
-            Style::default().fg(DIM),
-        )]));
-        f.render_widget(
-            Paragraph::new(lines).block(panel("updating")),
-            rect,
-        );
+        f.render_widget(Paragraph::new(lines).block(panel("updating")), rect);
         return;
     }
 
@@ -148,26 +145,37 @@ fn draw_notice(
         Style::default().fg(CREAM),
     )]));
     lines.push(Line::from(""));
-    // first note line only, the full text lives on the releases page
-    if let Some(first) = rel.notes.lines().find(|l| !l.trim().is_empty()) {
-        let text: String = first.trim().chars().take(inner_w - 4).collect();
-        lines.push(Line::from(vec![Span::styled(
-            format!("  {text}"),
-            Style::default().fg(DIM),
-        )]));
-    } else {
+
+    // a couple of note lines, the rest is on the releases page
+    let notes: Vec<String> = rel
+        .notes
+        .lines()
+        .map(|l| l.trim().trim_start_matches(['-', '*', '>']).trim())
+        .filter(|l| !l.is_empty())
+        .take(3)
+        .map(|l| format!("  {l}").chars().take(inner_w - 2).collect())
+        .collect();
+    if notes.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             "  bug fixes and such.",
             Style::default().fg(DIM),
         )]));
+    } else {
+        for n in &notes {
+            lines.push(Line::from(vec![Span::styled(
+                n.clone(),
+                Style::default().fg(DIM),
+            )]));
+        }
     }
+    lines.push(Line::from(""));
     lines.push(Line::from(""));
 
     // buttons on one row, update first so it reads as the default
     let labels = ["update", "later"];
-    let mut spans: Vec<Span<'_>> = vec![Span::styled(" ".repeat(3), Style::default().fg(CREAM))];
+    let mut spans: Vec<Span<'_>> = vec![Span::styled("  ".to_string(), Style::default().fg(CREAM))];
     let mut xs: Vec<u16> = Vec::new();
-    let mut cursor = 3usize;
+    let mut cursor = 2usize;
     for (i, l) in labels.iter().enumerate() {
         xs.push(cursor as u16);
         let on = app.notice_idx == i;
@@ -179,8 +187,8 @@ fn draw_notice(
                 Style::default().fg(CHEESE)
             },
         ));
-        cursor += l.chars().count() + 3;
-        spans.push(Span::styled("  ", Style::default().fg(CREAM)));
+        cursor += l.chars().count() + 4;
+        spans.push(Span::styled("  ".to_string(), Style::default().fg(CREAM)));
     }
     lines.push(Line::from(spans));
     f.render_widget(Paragraph::new(lines).block(panel("update available")), rect);

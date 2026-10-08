@@ -52,6 +52,13 @@ notes come from the top entry of the changelog below.
 
 ## Changelog
 
+### 1.0.3
+
+- the update screen owns the whole window while it is up, no panels peeking
+  out from behind it
+- the app relaunches itself once the update finished installing, the silent
+  setup was swallowing the postinstall launch so it just stayed closed
+
 ### 1.0.2
 
 - self update: the app checks the github releases api on launch and shows a
