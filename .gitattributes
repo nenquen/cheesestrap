@@ -1,0 +1,7 @@
+# keep checkouts identical everywhere, the github runner and a local windows
+# box should not disagree about line endings
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.bmp binary

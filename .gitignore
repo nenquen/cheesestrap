@@ -1,0 +1,5 @@
+/target
+**/*.rs.bk
+
+# build output of the installer script
+/installer/output

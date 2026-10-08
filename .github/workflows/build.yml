@@ -1,0 +1,62 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # windows-latest already ships an MSVC toolchain, so this only makes sure
+      # the host triple matches the one rust-toolchain.toml pins.
+      - name: Set up Rust
+        run: |
+          rustup show
+          rustc -vV
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-msvc-release
+
+      - name: Build the app
+        run: cargo build --release --locked
+
+      # The GitHub runner image ships Inno Setup, but install it if a future
+      # image drops it, otherwise ISCC just is not there.
+      - name: Ensure Inno Setup 6
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found" }
+          & $iscc -v
+
+      - name: Build the setup exe
+        working-directory: installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" Cheesestrap.iss
+
+      - name: Upload the app
+        uses: actions/upload-artifact@v4
+        with:
+          name: cheesestrap-app
+          path: target/release/cheesestrap.exe
+          if-no-files-found: error
+
+      - name: Upload the setup
+        uses: actions/upload-artifact@v4
+        with:
+          name: cheesestrap-setup
+          path: installer/output/Cheesestrap-Setup-*.exe
+          if-no-files-found: error
