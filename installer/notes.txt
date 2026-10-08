@@ -1,0 +1,14 @@
+cheesestrap, a small roblox client bootstrapper.
+
+no official installer, the client is downloaded into our own clients/ folder
+and updated before every launch. the interface is a ratatui tui painted inside
+our own window, so there is no console behind it.
+
+this build:
+
+- versions are the build time, nothing to bump by hand
+- the app updates itself from the github release, it offers the update and
+  installs the setup for you
+- webview2 is detected and repaired instead of the broken delete button that
+  used to leave a stale registration behind
+- data lives next to the exe: clients/, logs/, settings.json

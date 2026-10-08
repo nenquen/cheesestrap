@@ -87,35 +87,19 @@ jobs:
           }
           Write-Output "version $($env:VERSION) has not shipped yet, good"
 
-      # Release notes are the newest entry in the readme changelog. The heading
-      # is whatever we wrote, the version is generated at build time and cannot
-      # be a heading we typed in advance, so take the first entry instead of
-      # looking for a match.
-      - name: Take the newest changelog entry from the readme
+      # Release notes are a single plain text file, rewritten each time. No
+      # history anywhere, whatever is in there is what ships.
+      - name: Read the release notes
         id: notes
         shell: pwsh
         run: |
-          $lines = Get-Content README.md
-          $start = ($lines | Select-String '^##\s+Changelog\s*$' | Select-Object -First 1).LineNumber
-          if (-not $start) { throw "no ## Changelog heading in README.md" }
-          $body = @()
-          $inside = $false
-          foreach ($line in $lines[$start..($lines.Count - 1)]) {
-            if ($line -match '^##\s') { break }
-            if ($line -match '^###\s') {
-              if ($inside) { break }   # stop at the second entry
-              $inside = $true
-              continue
-            }
-            if ($inside) { $body += $line }
-          }
-          $notes = ($body -join "`n").Trim()
-          if (-not $notes) { $notes = "no notes for this build" }
-          # heredoc form, nothing but the notes between the markers or they
-          # end up in the release body
-          "body<<CHANGELOG_EOF" >> $env:GITHUB_OUTPUT
-          $notes          >> $env:GITHUB_OUTPUT
-          "CHANGELOG_EOF"  >> $env:GITHUB_OUTPUT
+          $file = "installer\notes.txt"
+          if (-not (Test-Path $file)) { throw "$file is missing" }
+          $notes = (Get-Content $file -Raw).Trim()
+          if (-not $notes) { throw "$file is empty" }
+          "body<<NOTES_EOF" >> $env:GITHUB_OUTPUT
+          $notes        >> $env:GITHUB_OUTPUT
+          "NOTES_EOF"   >> $env:GITHUB_OUTPUT
 
       # gh is preinstalled and picks up GITHUB_TOKEN, so the same tag being
       # pushed twice updates the existing release instead of failing.
