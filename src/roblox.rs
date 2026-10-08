@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::mpsc::Sender;
@@ -9,20 +8,8 @@ use crate::app::WorkerMsg;
 const VERSION_API: &str =
     "https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer";
 const SETUP_CDN: &str = "https://setup.rbxcdn.com";
-const USER_AGENT: &str = concat!("Cheesestrap/", env!("CARGO_PKG_VERSION"));
 
 const APP_SETTINGS: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Settings>\r\n\t<ContentFolder>content</ContentFolder>\r\n\t<BaseUrl>http://www.roblox.com</BaseUrl>\r\n</Settings>\r\n";
-
-fn http() -> &'static reqwest::blocking::Client {
-    static C: std::sync::OnceLock<reqwest::blocking::Client> =
-        std::sync::OnceLock::new();
-    C.get_or_init(|| {
-        reqwest::blocking::Client::builder()
-            .user_agent(USER_AGENT)
-            .build()
-            .expect("http client")
-    })
-}
 
 pub fn app_base_dir() -> Option<PathBuf> {
     std::env::current_exe()
@@ -69,7 +56,7 @@ pub fn player_exe(guid: &str) -> Option<PathBuf> {
 }
 
 pub fn fetch_latest_guid() -> Result<String, String> {
-    let res: serde_json::Value = http()
+    let res: serde_json::Value = crate::net::client()
         .get(VERSION_API)
         .send()
         .map_err(|e| e.to_string())?
@@ -88,7 +75,7 @@ struct Package {
 
 fn fetch_manifest(guid: &str) -> Result<Vec<Package>, String> {
     let url = format!("{SETUP_CDN}/{guid}-rbxPkgManifest.txt");
-    let text = http()
+    let text = crate::net::client()
         .get(&url)
         .send()
         .map_err(|e| e.to_string())?
@@ -144,35 +131,6 @@ fn package_subdir(name: &str) -> Option<&'static str> {
     })
 }
 
-fn download_to(
-    url: &str,
-    dest: &PathBuf,
-    tx: &Sender<WorkerMsg>,
-    base: u64,
-    total: u64,
-) -> Result<(), String> {
-    let mut res = http().get(url).send().map_err(|e| e.to_string())?;
-    if !res.status().is_success() {
-        return Err(format!("download failed: {}", res.status()));
-    }
-    let mut file = fs::File::create(dest).map_err(|e| e.to_string())?;
-    let mut buf = [0u8; 65536];
-    let mut done: u64 = 0;
-    loop {
-        let n = res.read(&mut buf).map_err(|e| e.to_string())?;
-        if n == 0 {
-            break;
-        }
-        file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-        done += n as u64;
-        let _ = tx.send(WorkerMsg::Progress {
-            done: base + done,
-            total,
-        });
-    }
-    Ok(())
-}
-
 pub fn download_client(guid: &str, tx: &Sender<WorkerMsg>) -> Result<(), String> {
     let pkgs: Vec<Package> = fetch_manifest(guid)?
         .into_iter()
@@ -211,12 +169,12 @@ fn download_all(
         )));
         let url = format!("{SETUP_CDN}/{guid}-{}", pkg.name);
         let tmp = std::env::temp_dir().join(format!("cheesestrap-{}.zip", pkg.name));
-        download_to(&url, &tmp, tx, base, total)?;
+        crate::net::download_to(&url, &tmp, tx, base, total)?;
         let file = fs::File::open(&tmp).map_err(|e| e.to_string())?;
         let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
         match package_subdir(&pkg.name) {
             Some("") | None => {
-                archive.extract(&dir).map_err(|e| e.to_string())?;
+                archive.extract(dir).map_err(|e| e.to_string())?;
             }
             Some(sub) => {
                 let target = dir.join(sub);
@@ -492,7 +450,7 @@ pub fn install_webview2_runtime(tx: &Sender<WorkerMsg>) -> Result<Vec<String>, S
     .ok();
 
     let tmp = std::env::temp_dir().join("cheesestrap-webview2-runtime.exe");
-    let bytes = http()
+    let bytes = crate::net::client()
         .get(WV2_BOOTSTRAP)
         .send()
         .map_err(|e| format!("could not reach microsoft: {e}"))?
@@ -570,7 +528,7 @@ pub fn ensure_loader_dll(guid: &str, tx: &Sender<WorkerMsg>) -> Result<(), Strin
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let url = format!("{SETUP_CDN}/{guid}-{}", pkg.name);
     let tmp = std::env::temp_dir().join("cheesestrap-webview2dll.zip");
-    download_to(&url, &tmp, tx, 0, pkg.packed)?;
+    crate::net::download_to(&url, &tmp, tx, 0, pkg.packed)?;
     let file = fs::File::open(&tmp).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     archive.extract(&dir).map_err(|e| e.to_string())?;

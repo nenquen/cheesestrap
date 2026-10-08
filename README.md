@@ -55,6 +55,16 @@ notes come from the top entry of the changelog below.
 
 ## Changelog
 
+### 1.0.6
+
+- cleanup pass, no behaviour change
+- the http client and the file downloader existed twice, once for roblox and
+  once for the updater, they live in `net.rs` now with one connection pool
+- dropped twenty unused colour arms in `theme.rs` and an empty
+  `.cargo/config.toml` left over from the mingw days
+- rewrote the log wrapping, it was doing a hand rolled prepend per line
+- clippy is clean
+
 ### 1.0.5
 
 - a guard in the release workflow refuses to publish when the version did not

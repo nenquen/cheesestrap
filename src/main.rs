@@ -2,6 +2,7 @@
 
 mod app;
 mod roblox;
+mod net;
 mod theme;
 mod ui;
 mod update;
@@ -125,16 +126,8 @@ impl CheeseApp {
                                     app.show_hints = !app.show_hints;
                                     app.save();
                                 }
-                                2 => {
-                                    if !app.webview_ok {
-                                        app.repair_webview2();
-                                    }
-                                }
-                                3 => {
-                                    if app.can_uninstall {
-                                        app.uninstall_roblox();
-                                    }
-                                }
+                                2 if !app.webview_ok => app.repair_webview2(),
+                                3 if app.can_uninstall => app.uninstall_roblox(),
                                 _ => {}
                             },
                             _ => {}

@@ -290,7 +290,7 @@ impl App {
         ));
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let r = crate::update::download(&release, &tx).map_err(|e| e);
+            let r = crate::update::download(&release, &tx);
             let _ = tx.send(WorkerMsg::UpdateDownloaded(r));
         });
     }
@@ -430,15 +430,17 @@ impl App {
                     self.push_log("version info refreshed.".to_string());
                 }
                 WorkerMsg::Progress { done, total } => {
-                    if total > 0 {
-                        let pct = done * 100 / total;
-                        if self.updating {
-                            self.update_pct = pct as u8;
-                        }
-                        if pct / 25 > self.logged_pct / 25 && pct < 100 {
-                            self.logged_pct = pct;
-                            self.push_log(format!("downloaded {pct}%..."));
-                        }
+                    let Some(pct) = done.checked_mul(100).and_then(|d| d.checked_div(total))
+                    else {
+                        return;
+                    };
+                    if self.updating {
+                        self.update_pct = pct as u8;
+                    }
+                    // the update screen has its own bar, no need to spam the log
+                    if !self.updating && pct < 100 && pct / 25 > self.logged_pct / 25 {
+                        self.logged_pct = pct;
+                        self.push_log(format!("downloaded {pct}%..."));
                     }
                 }
                 WorkerMsg::InstallDone(Ok(guid)) => {

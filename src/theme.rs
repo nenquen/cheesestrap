@@ -13,25 +13,10 @@ pub const GOOD: Color = Color::Rgb(163, 214, 92);
 pub const BAD: Color = Color::Rgb(255, 107, 94);
 pub const SELECT: Color = Color::Rgb(172, 120, 20);
 
+/// Every colour above is `Rgb`, so anything else can only be a default cell
+/// ratatui handed back. Cream is the closest match to an untouched cell.
 pub fn to_egui(c: Color) -> Color32 {
     match c {
-        Color::Reset => Color32::from_rgb(255, 243, 214),
-        Color::Black => Color32::BLACK,
-        Color::Red => Color32::RED,
-        Color::Green => Color32::GREEN,
-        Color::Yellow => Color32::YELLOW,
-        Color::Blue => Color32::BLUE,
-        Color::Magenta => Color32::from_rgb(255, 0, 255),
-        Color::Cyan => Color32::from_rgb(0, 255, 255),
-        Color::Gray => Color32::GRAY,
-        Color::DarkGray => Color32::DARK_GRAY,
-        Color::LightRed => Color32::LIGHT_RED,
-        Color::LightGreen => Color32::LIGHT_GREEN,
-        Color::LightYellow => Color32::LIGHT_YELLOW,
-        Color::LightBlue => Color32::LIGHT_BLUE,
-        Color::LightMagenta => Color32::from_rgb(255, 128, 255),
-        Color::LightCyan => Color32::from_rgb(128, 255, 255),
-        Color::White => Color32::WHITE,
         Color::Rgb(r, g, b) => Color32::from_rgb(r, g, b),
         _ => Color32::from_rgb(255, 243, 214),
     }

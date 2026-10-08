@@ -1,8 +1,6 @@
 //! Self update: ask the github releases api whether a newer cheesestrap is
 //! out, pull its setup exe, and hand the install over to it.
 
-use std::fs;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::Sender;
@@ -58,20 +56,9 @@ fn version_from_asset(name: &str) -> Option<String> {
     }
 }
 
-fn http() -> &'static reqwest::blocking::Client {
-    static C: std::sync::OnceLock<reqwest::blocking::Client> =
-        std::sync::OnceLock::new();
-    C.get_or_init(|| {
-        reqwest::blocking::Client::builder()
-            .user_agent(concat!("Cheesestrap/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .expect("http client")
-    })
-}
-
 /// `Ok(None)` means we are already on the newest release.
 pub fn check() -> Result<Option<Release>, String> {
-    let body = http()
+    let body = crate::net::client()
         .get(API)
         .header("accept", "application/vnd.github+json")
         .send()
@@ -119,8 +106,8 @@ pub fn check() -> Result<Option<Release>, String> {
     }))
 }
 
-/// Streams the asset to the temp folder, reporting progress like the roblox
-/// download does so the log looks the same for both.
+/// Streams the asset to the temp folder, reporting progress the same way the
+/// roblox download does so the bar behaves identically for both.
 pub fn download(release: &Release, tx: &Sender<WorkerMsg>) -> Result<PathBuf, String> {
     tx.send(WorkerMsg::Log(format!(
         "downloading cheesestrap {} ({} MB)...",
@@ -129,39 +116,8 @@ pub fn download(release: &Release, tx: &Sender<WorkerMsg>) -> Result<PathBuf, St
     )))
     .ok();
 
-    let mut res = http()
-        .get(&release.asset_url)
-        .send()
-        .map_err(|e| format!("download failed: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("download failed: {e}"))?;
-
-    let total = res.content_length().unwrap_or(release.size);
     let tmp = std::env::temp_dir().join(&release.asset_name);
-    let mut file = fs::File::create(&tmp).map_err(|e| format!("could not write: {e}"))?;
-    let mut buf = vec![0u8; 128 * 1024];
-    let mut done = 0u64;
-    let mut last_pct = 0u8;
-    loop {
-        let n = res
-            .read(&mut buf)
-            .map_err(|e| format!("download failed: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        file.write_all(&buf[..n])
-            .map_err(|e| format!("could not write: {e}"))?;
-        done += n as u64;
-        if total > 0 {
-            let pct = (done * 100 / total) as u8;
-            if pct / 10 > last_pct / 10 {
-                last_pct = pct;
-                tx.send(WorkerMsg::Progress { done, total }).ok();
-            }
-        }
-    }
-    file.flush().ok();
-    drop(file);
+    crate::net::download_to(&release.asset_url, &tmp, tx, 0, release.size)?;
     Ok(tmp)
 }
 

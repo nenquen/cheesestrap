@@ -32,6 +32,29 @@ fn panel(title: &str) -> Block<'_> {
         .style(Style::default().bg(PANEL))
 }
 
+/// Log lines are coloured by how they start, which is enough to tell progress
+/// from a result without tagging every call site.
+fn log_style(line: &str) -> Style {
+    if line.contains("fail") {
+        Style::default().fg(BAD)
+    } else if line.starts_with("download") || line.starts_with("installing") {
+        Style::default().fg(MELT)
+    } else if line.starts_with("ready")
+        || line.starts_with("roblox launched")
+        || line.starts_with("webview2")
+    {
+        Style::default().fg(GOOD)
+    } else if line.starts_with("version")
+        || line.starts_with("latest")
+        || line.starts_with("checking")
+        || line.starts_with("updating")
+    {
+        Style::default().fg(CHEESE)
+    } else {
+        Style::default().fg(CREAM)
+    }
+}
+
 fn status_lines(app: &App) -> Vec<Line<'_>> {
     let installed = app.installed.as_deref().unwrap_or("none");
     let latest = app.latest.as_deref().unwrap_or("...");
@@ -118,7 +141,7 @@ fn draw_notice(
         ]));
         lines.push(Line::from(""));
         let bar_w = inner_w.saturating_sub(10).max(4);
-        let filled = (bar_w as usize * pct as usize / 100).min(bar_w as usize);
+        let filled = (bar_w * pct as usize / 100).min(bar_w);
         let bar: String = (0..bar_w)
             .map(|i| if i < filled { '#' } else { '.' })
             .collect();
@@ -280,44 +303,21 @@ fn draw_main(
         let w = right[1].width.saturating_sub(2).max(1) as usize;
         let inner = right[1].height.saturating_sub(2).max(1) as usize;
         let len = app.log.len();
-        let mut end = app.log_view_end.unwrap_or(len).min(len);
-        end = end.max(inner.min(len));
-        let mut rows: Vec<(String, Style)> = Vec::new();
-        for l in app.log[..end].iter().rev() {
-            if rows.len() >= inner {
-                break;
+        let end = app.log_view_end.unwrap_or(len).min(len);
+        // wrap every visible line, keep only as many wrapped rows as the box
+        // is tall from the bottom, so the newest output is what stays up
+        let mut rows: Vec<Line> = Vec::new();
+        for l in &app.log[..end] {
+            let style = log_style(l);
+            let chars: Vec<char> = l.chars().collect();
+            for chunk in chars.chunks(w) {
+                rows.push(Line::from(vec![Span::styled(
+                    chunk.iter().collect::<String>(),
+                    style,
+                )]));
             }
-            let style = if l.contains("fail") {
-                Style::default().fg(BAD)
-            } else if l.starts_with("download") || l.starts_with("installing") {
-                Style::default().fg(MELT)
-            } else if l.starts_with("ready")
-                || l.starts_with("roblox launched")
-                || l.starts_with("webview2")
-            {
-                Style::default().fg(GOOD)
-            } else if l.starts_with("version")
-                || l.starts_with("latest")
-                || l.starts_with("checking")
-                || l.starts_with("updating")
-            {
-                Style::default().fg(CHEESE)
-            } else {
-                Style::default().fg(CREAM)
-            };
-            let ch: Vec<char> = l.chars().collect();
-            let mut chunks: Vec<(String, Style)> = ch
-                .chunks(w)
-                .map(|c| (c.iter().collect(), style.clone()))
-                .collect();
-            chunks.append(&mut rows);
-            rows = chunks;
         }
-        let start = rows.len().saturating_sub(inner);
-        rows[start..]
-            .iter()
-            .map(|(t, s)| Line::from(vec![Span::styled(t.clone(), s.clone())]))
-            .collect()
+        rows.split_off(rows.len().saturating_sub(inner))
     };
     f.render_widget(Paragraph::new(log_lines).block(panel("log")), right[1]);
 }
@@ -328,35 +328,23 @@ fn draw_settings(
     area: ratatui::layout::Rect,
     hot: &mut Vec<HotZone>,
 ) {
-    let rows = vec![
+    let rows = [
         (
             "save logs to file",
-            if app.logs_to_file {
-                "[x]".to_string()
-            } else {
-                "[ ]".to_string()
-            },
+            if app.logs_to_file { "[x]" } else { "[ ]" },
             true,
         ),
         (
             "show hints bar",
-            if app.show_hints {
-                "[x]".to_string()
-            } else {
-                "[ ]".to_string()
-            },
+            if app.show_hints { "[x]" } else { "[ ]" },
             true,
         ),
         (
             "repair webview2",
-            if app.webview_ok {
-                "".to_string()
-            } else {
-                "needed".to_string()
-            },
+            if app.webview_ok { "" } else { "needed" },
             !app.webview_ok,
         ),
-        ("uninstall roblox", "".to_string(), app.can_uninstall),
+        ("uninstall roblox", "", app.can_uninstall),
     ];
     let label_w = rows.iter().map(|(l, _, _)| l.len()).max().unwrap_or(0);
     let items: Vec<ListItem> = rows
@@ -375,13 +363,7 @@ fn draw_settings(
             };
             let marker = " ";
             ListItem::new(Line::from(vec![Span::styled(
-                format!(
-                    "{marker} {label:<label_w$}  {value} ",
-                    marker = marker,
-                    label = label,
-                    label_w = label_w,
-                    value = value
-                ),
+                format!("{marker} {label:<label_w$}  {value} "),
                 style,
             )]))
         })
