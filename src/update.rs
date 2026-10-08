@@ -60,26 +60,29 @@ pub fn newer(candidate: &str, base: &str) -> bool {
     false
 }
 
-/// `2026-10-08-1415` reads better as `2026-10-08 14:15`. Anything that is not
-/// a build stamp is passed through untouched, which covers the crate version a
-/// plain `cargo build` falls back to.
+/// Shows the stamp the way people write dates, `08-10-2026 14:36`.
+///
+/// The stored stamp stays `2026-10-08-1436` on purpose. Day first does not
+/// survive a numeric compare of the parts, and the file name carries the stamp,
+/// so reordering it would leave every build that is already installed unable to
+/// tell that a newer one exists. Only the display is reordered.
 pub fn pretty(version: &str) -> String {
     let parts: Vec<&str> = version.split('-').collect();
-    if parts.len() != 4 {
+    if parts.len() != 4 || parts.iter().any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()))
+    {
         return version.to_string();
     }
-    let (Some(y), Some(m), Some(d), Some(hm)) = (
-        parts[0].parse::<u32>().ok(),
-        parts[1].parse::<u32>().ok(),
-        parts[2].parse::<u32>().ok(),
-        parts[3].get(..4),
-    ) else {
-        return version.to_string();
-    };
-    if parts[3].len() != 4 || !parts[3].chars().all(|c| c.is_ascii_digit()) {
+    if parts[3].len() != 4 {
         return version.to_string();
     }
-    format!("{y}-{m:02}-{d:02} {}:{}", &hm[..2], &hm[2..])
+    format!(
+        "{}-{}-{} {}:{}",
+        parts[2],
+        parts[1],
+        parts[0],
+        &parts[3][..2],
+        &parts[3][2..]
+    )
 }
 
 /// Pulls the version out of `Cheesestrap-Setup-2026-10-08-1415-x64.exe`. The
@@ -243,10 +246,22 @@ mod tests {
         assert!(newer("2026-10-08-1415", "1.0.0"));
     }
 
+    // Guards the reason the stamp stays iso. If it were day first, a build
+    // that is already installed would read the newest file name as
+    // 10 < 2026 and decide it was never offered an update.
+    #[test]
+    fn a_day_first_stamp_would_be_invisible_to_installed_builds() {
+        let installed = "2026-10-08-1438";
+        let day_first = "08-10-2026-1445"; // same day, seven minutes later
+        assert!(!newer(day_first, installed), "day first cannot be shipped");
+        assert!(newer("2026-10-08-1445", installed), "iso can");
+    }
+
     #[test]
     fn stamps_display_nicely() {
-        assert_eq!(pretty("2026-10-08-1415"), "2026-10-08 14:15");
-        assert_eq!(pretty("2026-01-02-0304"), "2026-01-02 03:04");
+        // day first on screen, iso in the file name
+        assert_eq!(pretty("2026-10-08-1415"), "08-10-2026 14:15");
+        assert_eq!(pretty("2026-01-02-0304"), "02-01-2026 03:04");
         // anything that is not a stamp is left alone
         assert_eq!(pretty("1.0.0"), "1.0.0");
         assert_eq!(pretty(""), "");

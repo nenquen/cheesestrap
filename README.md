@@ -58,7 +58,7 @@ notes come from the top entry of the changelog below.
 ## Changelog
 
 Versions are the moment the build happened, `2026-10-08-1436` in UTC, shown
-inside the app as `2026-10-08 14:36`. Nothing to bump, every build is its own
+inside the app as `08-10-2026 14:36`. Nothing to bump, every build is its own
 version and the update check just compares the numbers.
 
 ### date based versions
@@ -66,6 +66,9 @@ version and the update check just compares the numbers.
 - the version is the build time, no hand written number is left anywhere.
   `installer\stamp-version.ps1` computes it and the inno script and the binary
   both get it from there
+- the app writes the date day first, `08-10-2026 14:36`. the file name stays
+  iso on purpose, a day first stamp would make every already installed build
+  read the newest release as older and stop offering updates
 - unit tests cover the comparison, the display format and pulling the stamp out
   of the setup file name
 - release notes take the newest changelog entry instead of matching a version,
