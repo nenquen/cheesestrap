@@ -45,3 +45,32 @@ Everything lives next to the exe, so under `C:\Program Files\Cheesestrap`:
 
 `.github/workflows/build.yml` builds the app and then the setup exe on every
 push, and uploads both as artifacts.
+
+`.github/workflows/release.yml` does the same and then publishes a github
+release with the setup exe attached. Push the `release` tag to cut one, the
+notes come from the top entry of the changelog below.
+
+## Changelog
+
+### 1.0.2
+
+- self update: the app checks the github releases api on launch and shows a
+  notice when a newer version exists, pressing update downloads the setup and
+  reinstalls over the running app
+- release workflow: pushing the `release` tag builds the setup and publishes
+  it as a release with the matching changelog entry as the notes
+- webview2 detection reads the 32 bit registry view, which is where the x64
+  runtime actually registers itself, it was reporting a healthy install as
+  missing
+
+### 1.0.1
+
+- webview2 repair: replaces the old delete webview2 setting, which left a
+  stale edge registration behind and made roblox pop an install dialog with
+  nothing to install from
+- setup and exe keep all their data next to the exe instead of appdata
+- desktop shortcut no longer carries x64 in its name
+
+### 1.0.0
+
+- first public build

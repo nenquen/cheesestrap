@@ -382,9 +382,25 @@ pub fn edgewebview_dirs() -> Vec<PathBuf> {
     out
 }
 
-/// Registry key edge update uses to advertise the webview2 runtime.
+/// Registry key edge update uses to advertise the webview2 runtime, without
+/// the leading SOFTWARE so the 32 bit view can be spliced in front of it.
 const WV2_CLIENT_KEY: &str =
-    "SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+    "Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+
+/// Every place the runtime can register itself.
+pub fn wv2_client_keys() -> Vec<(winreg::HKEY, String)> {
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    vec![
+        (HKEY_LOCAL_MACHINE, format!("SOFTWARE\\{WV2_CLIENT_KEY}")),
+        // the x64 runtime drops itself in the 32 bit view, so the plain
+        // SOFTWARE\\ path finds nothing on most machines
+        (
+            HKEY_LOCAL_MACHINE,
+            format!("SOFTWARE\\WOW6432Node\\{WV2_CLIENT_KEY}"),
+        ),
+        (HKEY_CURRENT_USER, format!("SOFTWARE\\{WV2_CLIENT_KEY}")),
+    ]
+}
 
 /// What state the webview2 runtime is in on this machine.
 pub enum Webview2State {
@@ -404,23 +420,11 @@ pub enum Webview2State {
 /// Reads the runtime state. `HKLM` is checked through the 32 bit view too since
 /// that is where a per machine install of the x64 runtime registers itself.
 pub fn webview2_state() -> Webview2State {
-    use winreg::enums::*;
     use winreg::RegKey;
 
     let mut found: Option<(String, String)> = None;
-    let views = [
-        (HKEY_LOCAL_MACHINE, false),
-        (HKEY_LOCAL_MACHINE, true),
-        (HKEY_CURRENT_USER, false),
-    ];
-    for (hive, wow64) in views {
-        let hk = RegKey::predef(hive);
-        let path = if wow64 {
-            format!("SOFTWARE\\WOW6432Node\\{WV2_CLIENT_KEY}")
-        } else {
-            WV2_CLIENT_KEY.to_string()
-        };
-        let Ok(key) = hk.open_subkey(&path) else {
+    for (hive, path) in wv2_client_keys() {
+        let Ok(key) = RegKey::predef(hive).open_subkey(&path) else {
             continue;
         };
         let version = key.get_value::<String, _>("pv").unwrap_or_default();

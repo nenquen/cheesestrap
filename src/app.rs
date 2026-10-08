@@ -23,6 +23,9 @@ pub enum WorkerMsg {
     Launched(Result<String, String>),
     Uninstalled(Vec<String>),
     WebviewFixed(Vec<String>),
+    /// `Ok(None)` means already up to date.
+    UpdateCheck(Result<Option<crate::update::Release>, String>),
+    UpdateDownloaded(Result<std::path::PathBuf, String>),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -85,6 +88,16 @@ pub struct App {
     pub log: Vec<String>,
     pub busy: bool,
     pub ctx_close_requested: bool,
+    /// A newer cheesestrap on github, waiting for a decision.
+    pub update: Option<crate::update::Release>,
+    /// Set once the user said yes, drives the updating overlay.
+    pub updating: bool,
+    pub update_pct: u8,
+    pub notice_idx: usize,
+    /// The notice box in grid cells, so egui can drop the logo into it.
+    pub notice_rect: Option<(u16, u16, u16, u16)>,
+    /// Auto dismiss, so a popup nobody acts on goes away on its own.
+    pub notice_until: Option<std::time::Instant>,
     pub tx: Sender<WorkerMsg>,
     pub rx: Receiver<WorkerMsg>,
 }
@@ -117,6 +130,12 @@ impl App {
             ],
             busy: false,
             ctx_close_requested: false,
+            update: None,
+            updating: false,
+            update_pct: 0,
+            notice_idx: 0,
+            notice_rect: None,
+            notice_until: None,
             tx,
             rx,
         }
@@ -159,19 +178,9 @@ impl App {
     /// Kills the stale edge update keys that point at a folder edge deleted,
     /// so a reinstall is not mistaken for an up to date runtime.
     fn clear_stale_webview_keys() -> usize {
-        use winreg::enums::*;
         use winreg::RegKey;
-        const KEY: &str =
-            "SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
         let mut n = 0;
-        for (hive, sub) in [
-            (HKEY_LOCAL_MACHINE, KEY.to_string()),
-            (
-                HKEY_LOCAL_MACHINE,
-                format!("SOFTWARE\\WOW6432Node\\{KEY}"),
-            ),
-            (HKEY_CURRENT_USER, KEY.to_string()),
-        ] {
+        for (hive, sub) in roblox::wv2_client_keys() {
             let hk = RegKey::predef(hive);
             // only drop it when the folder it names is really gone, never a
             // working install
@@ -183,7 +192,10 @@ impl App {
             if location.is_empty() {
                 continue;
             }
-            if std::path::Path::new(&location).join("msedgewebview2.exe").exists() {
+            if std::path::Path::new(&location)
+                .join("msedgewebview2.exe")
+                .exists()
+            {
                 continue;
             }
             if hk.delete_subkey_all(&sub).is_ok() {
@@ -250,6 +262,58 @@ impl App {
                     location
                 };
                 format!("webview2 runtime: broken, {v} registered but {l} is gone")
+            }
+        }
+    }
+
+    /// Asks github whether a newer release is out. Runs on its own thread and
+    /// never blocks the ui, a slow or blocked api just means no popup.
+    pub fn check_update(&mut self) {
+        if self.updating {
+            return;
+        }
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let r = crate::update::check();
+            let _ = tx.send(WorkerMsg::UpdateCheck(r));
+        });
+    }
+
+    /// The user pressed update: pull the setup and hand the install over.
+    pub fn apply_update(&mut self) {
+        if self.updating {
+            return;
+        }
+        let Some(release) = self.update.clone() else {
+            return;
+        };
+        self.updating = true;
+        self.update_pct = 0;
+        self.push_log(format!(
+            "updating to cheesestrap {}...",
+            release.version
+        ));
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let r = crate::update::download(&release, &tx).map_err(|e| e);
+            let _ = tx.send(WorkerMsg::UpdateDownloaded(r));
+        });
+    }
+
+    pub fn dismiss_update(&mut self) {
+        self.update = None;
+        self.notice_until = None;
+    }
+
+    /// Called every frame, hides the popup once its time is up.
+    pub fn tick_notice(&mut self) {
+        if self.updating || self.update.is_none() {
+            return;
+        }
+        if let Some(t) = self.notice_until {
+            if std::time::Instant::now() >= t {
+                self.dismiss_update();
+                self.push_log("update notice dismissed.".to_string());
             }
         }
     }
@@ -391,6 +455,9 @@ impl App {
                 WorkerMsg::Progress { done, total } => {
                     if total > 0 {
                         let pct = done * 100 / total;
+                        if self.updating {
+                            self.update_pct = pct as u8;
+                        }
                         if pct / 25 > self.logged_pct / 25 && pct < 100 {
                             self.logged_pct = pct;
                             self.push_log(format!("downloaded {pct}%..."));
@@ -433,6 +500,48 @@ impl App {
                     }
                     self.push_log(Self::webview2_summary());
                     self.refresh_flags();
+                }
+                WorkerMsg::UpdateCheck(Ok(Some(rel))) => {
+                    self.push_log(format!(
+                        "cheesestrap {} is available, you have {}.",
+                        rel.version,
+                        crate::update::current()
+                    ));
+                    self.update = Some(rel);
+                    self.notice_idx = 0;
+                    // long enough to notice, short enough to not get in the way
+                    self.notice_until =
+                        Some(std::time::Instant::now() + std::time::Duration::from_secs(20));
+                }
+                WorkerMsg::UpdateCheck(Ok(None)) => {
+                    self.push_log("cheesestrap is up to date.".to_string());
+                }
+                WorkerMsg::UpdateCheck(Err(e)) => {
+                    // offline or api trouble, not worth bothering anyone about
+                    self.push_log(format!("update check skipped: {e}"));
+                }
+                WorkerMsg::UpdateDownloaded(Ok(path)) => {
+                    match crate::update::spawn_setup(&path) {
+                        Ok(()) => {
+                            self.update_pct = 100;
+                            self.push_log(
+                                "setup ready, installing. this window will close.".to_string(),
+                            );
+                            // linger a beat so the updating state is readable
+                            self.close_at = Some(
+                                std::time::Instant::now()
+                                    + std::time::Duration::from_millis(1400),
+                            );
+                        }
+                        Err(e) => {
+                            self.updating = false;
+                            self.push_log(e);
+                        }
+                    }
+                }
+                WorkerMsg::UpdateDownloaded(Err(e)) => {
+                    self.updating = false;
+                    self.push_log(format!("update failed: {e}"));
                 }
             }
         }

@@ -4,6 +4,7 @@ mod app;
 mod roblox;
 mod theme;
 mod ui;
+mod update;
 
 use std::sync::mpsc;
 
@@ -30,6 +31,7 @@ impl CheeseApp {
         let mut app = App::new(tx, rx);
         app.protocol_url = roblox::protocol_url_from_args();
         app.refresh_versions();
+        app.check_update();
         let backend = TestBackend::new(COLS, ROWS);
         let term = Terminal::new(backend).expect("test backend");
         Self {
@@ -51,6 +53,36 @@ impl CheeseApp {
     }
 
     fn handle_key(&mut self, code: KeyCode) {
+        // the update popup swallows input while it is up, so a stray keypress
+        // cannot land on the play button behind it
+        if !self.app.updating && self.app.update.is_some() {
+            match code {
+                KeyCode::Left => {
+                    self.app.using_keyboard = true;
+                    self.app.notice_idx = 0;
+                    return;
+                }
+                KeyCode::Right => {
+                    self.app.using_keyboard = true;
+                    self.app.notice_idx = 1;
+                    return;
+                }
+                KeyCode::Enter => {
+                    self.app.using_keyboard = true;
+                    if self.app.notice_idx == 0 {
+                        self.app.apply_update();
+                    } else {
+                        self.app.dismiss_update();
+                    }
+                    return;
+                }
+                KeyCode::Esc => {
+                    self.app.dismiss_update();
+                    return;
+                }
+                _ => {}
+            }
+        }
         if self.app.editing_args {
             match code {
                 KeyCode::Esc | KeyCode::Enter => self.app.editing_args = false,
@@ -176,6 +208,15 @@ impl CheeseApp {
                     }
                 } else {
                     self.handle_key(KeyCode::Enter);
+                }
+            }
+            Some(HotAction::Notice(i)) => {
+                self.app.notice_idx = i;
+                if i == 0 {
+                    self.app.apply_update();
+                } else {
+                    self.app.dismiss_update();
+                    self.app.push_log("update skipped.".to_string());
                 }
             }
             None => {}
@@ -307,7 +348,10 @@ impl eframe::App for CheeseApp {
                 return;
             }
         }
-        self.term.draw(|f| ui::draw(f, &self.app, &mut self.hot)).ok();
+        self.app.tick_notice();
+        self.term
+            .draw(|f| ui::draw(f, &mut self.app, &mut self.hot))
+            .ok();
         let buf = self.term.backend().buffer().clone();
         let w = buf.area.width as usize;
 
@@ -523,6 +567,30 @@ impl eframe::App for CheeseApp {
             }
         }
 
+        // The updating box gets the real app logo. The tui can only paint text
+        // rows, so the image has to go in here, over the space the popup left.
+        if self.app.updating {
+            if let Some((nx, ny, nw, _nh)) = self.app.notice_rect {
+                let size = 16.0;
+                let c = egui::pos2(
+                    origin.x + (nx as f32 + 3.0) * cell_w,
+                    origin.y + (ny as f32 + 2.0) * cell_h,
+                );
+                let _ = nw;
+                if let Some(tex) = &self.logo {
+                    painter.image(
+                        tex.id(),
+                        egui::Rect::from_min_size(c, egui::vec2(size, size)),
+                        egui::Rect::from_min_max(
+                            egui::pos2(0.0, 0.0),
+                            egui::pos2(1.0, 1.0),
+                        ),
+                        egui::Color32::WHITE,
+                    );
+                }
+            }
+        }
+
         self.app.hover = None;
         if let Some(pos) = ui.ctx().input(|i| i.pointer.latest_pos()) {
             let col = ((pos.x - origin.x) / cell_w).floor() as i32;
@@ -535,11 +603,13 @@ impl eframe::App for CheeseApp {
                             HotAction::Menu(_) => 0,
                             HotAction::Action(_) => 1,
                             HotAction::Setting(_) => 2,
+                            HotAction::Notice(_) => 3,
                         };
                         let idx = match z.action {
                             HotAction::Menu(i) => i,
                             HotAction::Action(i) => i,
                             HotAction::Setting(i) => i,
+                            HotAction::Notice(i) => i,
                         };
                         self.app.hover = Some((kind, idx));
                         break;

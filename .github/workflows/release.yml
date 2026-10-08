@@ -1,0 +1,128 @@
+name: release
+
+# The tag is literally "release", so pushing it again is what ships the next
+# version. The number that matters lives in the setup file name, which the
+# workflow reads out of Cargo.toml.
+on:
+  push:
+    tags:
+      - release
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        run: |
+          rustup show
+          rustc -vV
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-msvc-release
+
+      - name: Build the app
+        run: cargo build --release --locked
+
+      - name: Ensure Inno Setup 6
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) {
+            $found = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*" -Recurse -Filter ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $found) { throw "ISCC.exe not found" }
+            "ISCC_EXE=$($found.FullName)" >> $env:GITHUB_ENV
+          } else {
+            "ISCC_EXE=$iscc" >> $env:GITHUB_ENV
+          }
+          Write-Output "using $env:ISCC_EXE"
+
+      - name: Build the setup exe
+        shell: pwsh
+        run: |
+          & $env:ISCC_EXE /Qp "installer\Cheesestrap.iss"
+
+      # Cargo.toml is the source of truth for the version, the tag is just
+      # "release" so it cannot be trusted to carry the number.
+      - name: Read the version
+        id: ver
+        shell: pwsh
+        run: |
+          $toml = Get-Content Cargo.toml -Raw
+          if ($toml -notmatch '(?m)^version\s*=\s*"([^"]+)"') { throw "no version in Cargo.toml" }
+          $v = $Matches[1]
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "setup=Cheesestrap-Setup-$v-x64.exe" >> $env:GITHUB_OUTPUT
+          "title=cheesestrap $v" >> $env:GITHUB_ENV
+          Write-Output "shipping $v"
+
+      # Release notes are the matching changelog entry in the readme, so what
+      # gets published is exactly what the readme claims. Line based rather
+      # than one regex, .NET lazy quantifiers did not want to cooperate here.
+      - name: Pull the changelog entry out of the readme
+        id: notes
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $body = @()
+          $inside = $false
+          $found = $false
+          foreach ($line in (Get-Content README.md)) {
+            if ($line -match '^(#{2,3})\s+(.*)$') {
+              $level = $Matches[1].Length
+              $heading = $Matches[2].Trim()
+              if ($inside -and $level -le 3) { break }
+              if (-not $inside -and $level -eq 3 -and $heading -eq $env:VERSION) {
+                $inside = $true
+                $found = $true
+              }
+              continue
+            }
+            if ($inside) { $body += $line }
+          }
+          $notes = ($body -join "`n").Trim()
+          if (-not $found) {
+            Write-Warning "no changelog entry for $env:VERSION, publishing without notes"
+            $notes = "no notes for $env:VERSION"
+          }
+          "body<<CHANGELOG_EOF" >> $env:GITHUB_OUTPUT
+          "body"         >> $env:GITHUB_OUTPUT
+          $notes         >> $env:GITHUB_OUTPUT
+          "CHANGELOG_EOF" >> $env:GITHUB_OUTPUT
+
+      # gh is preinstalled and picks up GITHUB_TOKEN, so the same tag being
+      # pushed twice updates the existing release instead of failing.
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: release
+          TITLE: ${{ steps.ver.outputs.title }}
+          NOTES: ${{ steps.notes.outputs.body }}
+          ASSET: ${{ steps.ver.outputs.setup }}
+        run: |
+          $exe = "installer\output\$env:ASSET"
+          if (-not (Test-Path $exe)) { throw "setup exe not built: $exe" }
+          Write-Output "asset $((Get-Item $exe).Length) bytes"
+
+          $existing = gh release view $env:TAG --json tagName --jq .tagName 2>$null
+          if ($LASTEXITCODE -eq 0 -and $existing) {
+            gh release upload $env:TAG $exe --clobber
+            gh release edit $env:TAG --title $env:TITLE --notes $env:NOTES
+          } else {
+            gh release create $env:TAG $exe --title $env:TITLE --notes $env:NOTES --latest
+          }
+          gh release view $env:TAG

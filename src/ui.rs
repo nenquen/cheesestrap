@@ -12,6 +12,7 @@ pub enum HotAction {
     Menu(usize),
     Action(usize),
     Setting(usize),
+    Notice(usize),
 }
 
 pub struct HotZone {
@@ -46,7 +47,7 @@ fn status_lines(app: &App) -> Vec<Line<'_>> {
     ]
 }
 
-pub fn draw(f: &mut Frame, app: &App, hot: &mut Vec<HotZone>) {
+pub fn draw(f: &mut Frame, app: &mut App, hot: &mut Vec<HotZone>) {
     hot.clear();
     let area = f.area();
     f.render_widget(
@@ -71,6 +72,127 @@ pub fn draw(f: &mut Frame, app: &App, hot: &mut Vec<HotZone>) {
         );
     } else {
         draw_main(f, app, area, hot);
+    }
+
+    draw_notice(f, app, area, hot);
+}
+
+/// The update popup. Sits on top of everything, updates and later on the
+/// bottom row, and doubles as the progress display once update is pressed.
+fn draw_notice(
+    f: &mut Frame,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    hot: &mut Vec<HotZone>,
+) {
+    let show = app.updating || app.update.is_some();
+    app.notice_rect = None;
+    if !show {
+        return;
+    }
+
+    let w = (area.width as usize - 8).clamp(40, 60) as u16;
+    let h: u16 = if app.updating { 6 } else { 9 };
+    let rect = ratatui::layout::Rect::new(
+        area.x + (area.width.saturating_sub(w)) / 2,
+        area.y + (area.height.saturating_sub(h)) / 2,
+        w,
+        h,
+    );
+    app.notice_rect = Some((rect.x, rect.y, rect.width, rect.height));
+
+    let inner_w = w.saturating_sub(2) as usize;
+    let mut lines: Vec<Line<'_>> = vec![Line::from("")];
+
+    if app.updating {
+        let pct = app.update_pct;
+        // the logo is painted by egui over the first row, so leave it room
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {}   ", " ".repeat(4)), Style::default().fg(DIM)),
+            Span::styled(
+                "updating",
+                Style::default().fg(CHEESE).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(""));
+        // a plain bar, block glyphs stay inside the ascii range ratatui draws
+        let bar_w = inner_w.saturating_sub(10).max(4);
+        let filled = (bar_w as usize * pct as usize / 100).min(bar_w as usize);
+        let mut bar = String::new();
+        for i in 0..bar_w {
+            bar.push(if (i as usize) < filled { '#' } else { '.' });
+        }
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {bar}  "), Style::default().fg(CHEESE)),
+            Span::styled(format!("{pct:>3}%"), Style::default().fg(GOOD)),
+        ]));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            "  the setup will close this window and take over.",
+            Style::default().fg(DIM),
+        )]));
+        f.render_widget(
+            Paragraph::new(lines).block(panel("updating")),
+            rect,
+        );
+        return;
+    }
+
+    let rel = app.update.as_ref().expect("checked above");
+    lines.push(Line::from(vec![Span::styled(
+        format!("  cheesestrap {} is ready.", rel.version),
+        Style::default().fg(CHEESE).add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(vec![Span::styled(
+        format!("  you are running {}.", crate::update::current()),
+        Style::default().fg(CREAM),
+    )]));
+    lines.push(Line::from(""));
+    // first note line only, the full text lives on the releases page
+    if let Some(first) = rel.notes.lines().find(|l| !l.trim().is_empty()) {
+        let text: String = first.trim().chars().take(inner_w - 4).collect();
+        lines.push(Line::from(vec![Span::styled(
+            format!("  {text}"),
+            Style::default().fg(DIM),
+        )]));
+    } else {
+        lines.push(Line::from(vec![Span::styled(
+            "  bug fixes and such.",
+            Style::default().fg(DIM),
+        )]));
+    }
+    lines.push(Line::from(""));
+
+    // buttons on one row, update first so it reads as the default
+    let labels = ["update", "later"];
+    let mut spans: Vec<Span<'_>> = vec![Span::styled(" ".repeat(3), Style::default().fg(CREAM))];
+    let mut xs: Vec<u16> = Vec::new();
+    let mut cursor = 3usize;
+    for (i, l) in labels.iter().enumerate() {
+        xs.push(cursor as u16);
+        let on = app.notice_idx == i;
+        spans.push(Span::styled(
+            format!(" {l} "),
+            if on {
+                Style::default().fg(BG).bg(SELECT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(CHEESE)
+            },
+        ));
+        cursor += l.chars().count() + 3;
+        spans.push(Span::styled("  ", Style::default().fg(CREAM)));
+    }
+    lines.push(Line::from(spans));
+    f.render_widget(Paragraph::new(lines).block(panel("update available")), rect);
+
+    let row = rect.y + h - 2;
+    for (i, x) in xs.iter().enumerate() {
+        hot.push(HotZone {
+            x: rect.x + 1 + x,
+            y: row,
+            w: labels[i].len() as u16 + 2,
+            action: HotAction::Notice(i),
+        });
     }
 }
 

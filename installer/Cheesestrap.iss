@@ -2,7 +2,7 @@
 
 #define MyAppName "cheesestrap"
 ; keep this in sync with Cargo.toml, they are bumped together
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppExe "Cheesestrap.exe"
 
 [Setup]
@@ -18,6 +18,10 @@ OutputBaseFilename=Cheesestrap-Setup-{#MyAppVersion}-x64
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; The self update runs this over the top of a live cheesestrap, so let the
+; installer close us instead of failing on a locked exe.
+CloseApplications=yes
+RestartApplications=no
 WizardImageFile=wizard.bmp
 WizardSmallImageFile=wizard-small.bmp
 UninstallDisplayName=cheesestrap
