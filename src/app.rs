@@ -34,10 +34,29 @@ struct SavedSettings {
     logs_to_file: bool,
     #[serde(default = "default_true")]
     show_hints: bool,
+    /// unix seconds of the last successful github check
+    #[serde(default)]
+    checked_at: u64,
+    /// what that check found, kept so an update still shows while offline or
+    /// while github is rate limiting us
+    #[serde(default)]
+    seen: Option<crate::update::Release>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+/// How long a github answer stays good. Long enough that a normal week of
+/// launching the app costs a couple of requests, short enough that a release
+/// lands the same day.
+const CHECK_INTERVAL: u64 = 6 * 60 * 60;
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 fn settings_path() -> Option<std::path::PathBuf> {
@@ -60,6 +79,8 @@ fn save_settings(app: &App) {
     let s = SavedSettings {
         logs_to_file: app.logs_to_file,
         show_hints: app.show_hints,
+        checked_at: app.checked_at,
+        seen: app.seen.clone(),
     };
     if let Ok(text) = serde_json::to_string_pretty(&s) {
         let _ = std::fs::write(p, text);
@@ -95,6 +116,9 @@ pub struct App {
     pub update_pct: u8,
     /// The notice box in grid cells, so egui can drop the logo into it.
     pub notice_rect: Option<(u16, u16, u16, u16)>,
+    /// Update check cache, see `check_update` for why this exists.
+    pub checked_at: u64,
+    pub seen: Option<crate::update::Release>,
     pub tx: Sender<WorkerMsg>,
     pub rx: Receiver<WorkerMsg>,
 }
@@ -131,6 +155,8 @@ impl App {
             updating: false,
             update_pct: 0,
             notice_rect: None,
+            checked_at: saved.as_ref().map(|s| s.checked_at).unwrap_or(0),
+            seen: saved.and_then(|s| s.seen),
             tx,
             rx,
         }
@@ -267,11 +293,52 @@ impl App {
         if self.updating {
             return;
         }
+        if !crate::update::can_self_update() {
+            self.push_log(
+                "not an installed copy, skipping the cheesestrap update check.".to_string(),
+            );
+            return;
+        }
+        // Only github knows about a new release, but asking it costs one of 60
+        // requests per hour per ip address. Checking on every launch meant a
+        // handful of restarts, or two people behind the same router, burned
+        // that quota and then every user silently stopped getting updates
+        // because the api started answering 403.
+        //
+        // So the answer is cached on disk. A cached update is still shown, so
+        // being offline or throttled never hides an update that is waiting.
+        let now = unix_now();
+        let fresh = now.saturating_sub(self.checked_at) < CHECK_INTERVAL;
+        let pending = self
+            .seen
+            .clone()
+            .filter(|s| crate::update::newer(&s.version, crate::update::current()));
+
+        if fresh {
+            // the cached answer still stands, so answer from it and skip the
+            // api entirely rather than showing the same thing twice
+            match pending {
+                Some(rel) => self.offer_update(rel),
+                None => self.push_log("cheesestrap is up to date.".to_string()),
+            }
+            return;
+        }
+        // stale cache. ask again. if we already know about an update the
+        // screen stays up in the meantime and a failure costs nothing.
         let tx = self.tx.clone();
         thread::spawn(move || {
             let r = crate::update::check();
             let _ = tx.send(WorkerMsg::UpdateCheck(r));
         });
+    }
+
+    fn offer_update(&mut self, rel: crate::update::Release) {
+        self.push_log(format!(
+            "cheesestrap {} is available, you have {}.",
+            rel.version,
+            crate::update::current()
+        ));
+        self.update = Some(rel);
     }
 
     /// The user pressed update: pull the setup and hand the install over.
@@ -481,20 +548,20 @@ impl App {
                     self.refresh_flags();
                 }
                 WorkerMsg::UpdateCheck(Ok(Some(rel))) => {
-                    self.push_log(format!(
-                        "cheesestrap {} is available, you have {}.",
-                        rel.version,
-                        crate::update::current()
-                    ));
-                    // no timeout, no skip: an available update is the only thing the user
-                // can do until it is installed
-                    self.update = Some(rel);
+                    self.checked_at = unix_now();
+                    self.seen = Some(rel.clone());
+                    self.save();
+                    self.offer_update(rel);
                 }
                 WorkerMsg::UpdateCheck(Ok(None)) => {
+                    self.checked_at = unix_now();
+                    self.seen = None;
+                    self.save();
                     self.push_log("cheesestrap is up to date.".to_string());
                 }
                 WorkerMsg::UpdateCheck(Err(e)) => {
-                    // offline or api trouble, not worth bothering anyone about
+                    // offline, throttled or github having a bad day. do not
+                    // move checked_at, so the next launch tries again.
                     self.push_log(format!("update check skipped: {e}"));
                 }
                 WorkerMsg::UpdateDownloaded(Ok(path)) => {

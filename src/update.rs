@@ -7,14 +7,25 @@ use std::sync::mpsc::Sender;
 
 use crate::app::WorkerMsg;
 
-const API: &str = "https://api.github.com/repos/nenquen/cheesestrap/releases/latest";
+const API: &str = "https://api.github.com/repos/nenquen/cheesestrap/releases?per_page=10";
 
 /// The one place the version is read from, so cargo stays the single source.
 pub fn current() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-#[derive(Clone)]
+/// The self update replaces our own exe, which only works from the installed
+/// copy. A loose exe sitting in a downloads folder would get the setup run on
+/// it and end up with a second copy under program files while the one the user
+/// launched stayed old, so we just skip instead.
+pub fn can_self_update() -> bool {
+    let Some(dir) = crate::roblox::app_base_dir() else {
+        return false;
+    };
+    dir.join("unins000.exe").exists() || dir.join("unins000.dat").exists()
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Release {
     pub version: String,
     pub asset_name: String,
@@ -69,41 +80,68 @@ pub fn check() -> Result<Option<Release>, String> {
         .map_err(|e| format!("version check failed: {e}"))?;
     let v: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| format!("bad release json: {e}"))?;
+    let releases = v
+        .as_array()
+        .ok_or("release list was not an array.".to_string())?;
 
-    let assets = v["assets"].as_array().cloned().unwrap_or_default();
-    // prefer the setup exe, it is the thing we can actually install
-    let mut pick = assets
-        .iter()
-        .find(|a| a["name"].as_str().is_some_and(|n| n.starts_with("Cheesestrap-Setup-")));
-    if pick.is_none() {
-        pick = assets.iter().find(|a| a["name"].as_str().is_some_and(|n| n.ends_with(".exe")));
+    // Not /releases/latest on purpose. github decides "latest" by created_at,
+    // and we keep amending the same release instead of making a new one, so its
+    // created_at never moves. The day a second release exists the endpoint can
+    // hand back the old one. Taking the highest version across everything we
+    // see does not care about ordering at all.
+    let mut best: Option<Release> = None;
+    for r in releases {
+        let Some(rel) = parse_release(r) else {
+            continue;
+        };
+        let better = best
+            .as_ref()
+            .is_none_or(|b| newer(&rel.version, &b.version));
+        if better {
+            best = Some(rel);
+        }
     }
-    let Some(asset) = pick else {
-        return Err("the release has no exe to install.".to_string());
-    };
-    let asset_name = asset["name"].as_str().unwrap_or_default().to_string();
-    let asset_url = asset["browser_download_url"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    if asset_url.is_empty() {
-        return Err("the release asset has no download url.".to_string());
-    }
-    let size = asset["size"].as_u64().unwrap_or(0);
-    let version = match version_from_asset(&asset_name) {
-        Some(v) => v,
-        None => return Err("the release asset name has no version in it.".to_string()),
-    };
 
-    if !newer(&version, current()) {
+    let best = best.ok_or("no release with an installable exe.".to_string())?;
+    if !newer(&best.version, current()) {
         return Ok(None);
     }
-    Ok(Some(Release {
-        version,
+    Ok(Some(best))
+}
+
+/// Pulls the setup asset and the version out of one release object.
+fn parse_release(release: &serde_json::Value) -> Option<Release> {
+    // drafts and prereleases are things being worked on, not things to ship
+    if release["draft"].as_bool() == Some(true)
+        || release["prerelease"].as_bool() == Some(true)
+    {
+        return None;
+    }
+    let assets = release["assets"].as_array()?;
+    // prefer the setup exe, it is the thing we can actually install
+    let pick = assets
+        .iter()
+        .find(|a| {
+            a["name"]
+                .as_str()
+                .is_some_and(|n| n.starts_with("Cheesestrap-Setup-"))
+        })
+        .or_else(|| {
+            assets
+                .iter()
+                .find(|a| a["name"].as_str().is_some_and(|n| n.ends_with(".exe")))
+        })?;
+    let asset_name = pick["name"].as_str()?.to_string();
+    let asset_url = pick["browser_download_url"].as_str()?.to_string();
+    if asset_url.is_empty() {
+        return None;
+    }
+    Some(Release {
+        version: version_from_asset(&asset_name)?,
         asset_name,
         asset_url,
-        size,
-    }))
+        size: pick["size"].as_u64().unwrap_or(0),
+    })
 }
 
 /// Streams the asset to the temp folder, reporting progress the same way the
@@ -117,7 +155,7 @@ pub fn download(release: &Release, tx: &Sender<WorkerMsg>) -> Result<PathBuf, St
     .ok();
 
     let tmp = std::env::temp_dir().join(&release.asset_name);
-    crate::net::download_to(&release.asset_url, &tmp, tx, 0, release.size)?;
+    crate::net::download_to_checked(&release.asset_url, &tmp, tx, release.size)?;
     Ok(tmp)
 }
 

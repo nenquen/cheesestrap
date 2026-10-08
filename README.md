@@ -55,6 +55,19 @@ notes come from the top entry of the changelog below.
 
 ## Changelog
 
+### 1.0.9
+
+- the update check is cached for six hours, github only allows 60 requests an
+  hour per ip and asking on every launch silently starved users of updates
+- reads the release list and takes the highest version instead of trusting
+  /releases/latest, which orders by created_at and we always amend the same one
+- draft and prerelease entries are skipped
+- a short or failed download is deleted instead of leaving a broken setup behind,
+  and a truncated one is refused rather than run
+- a loose exe that was never installed skips the check instead of installing a
+  second copy under program files
+- connect timeout so a black hole network cannot hang the check forever
+
 ### 1.0.8
 
 - the update button was one row below where it was drawn, so clicking it did

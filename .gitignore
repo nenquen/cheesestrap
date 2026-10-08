@@ -3,3 +3,6 @@
 
 # build output of the installer script
 /installer/output
+
+# notes for whoever works on this locally, not for the repo
+/AGENTS.md

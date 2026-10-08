@@ -19,6 +19,10 @@ pub fn client() -> &'static reqwest::blocking::Client {
     C.get_or_init(|| {
         reqwest::blocking::Client::builder()
             .user_agent(USER_AGENT)
+            // a total timeout would cut off the multi hundred megabyte roblox
+            // download on a slow line, but a connect timeout only covers the
+            // part that can hang forever on a bad network
+            .connect_timeout(std::time::Duration::from_secs(15))
             .build()
             .expect("http client")
     })
@@ -65,6 +69,30 @@ pub fn download_to(
             done: base + done,
             total,
         });
+    }
+    Ok(())
+}
+
+/// Same as [`download_to`] but refuses to hand back a short file.
+///
+/// A transfer that dies halfway still returns success from the read loop, and
+/// running a truncated setup is worse than not updating at all. `expect` is the
+/// size github advertised, zero means it did not tell us.
+pub fn download_to_checked(
+    url: &str,
+    dest: &Path,
+    tx: &Sender<WorkerMsg>,
+    expect: u64,
+) -> Result<(), String> {
+    if let Err(e) = download_to(url, dest, tx, 0, expect) {
+        // a half written setup in temp is junk nobody will ever use
+        let _ = fs::remove_file(dest);
+        return Err(e);
+    }
+    let got = fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
+    if got == 0 || (expect > 0 && got != expect) {
+        let _ = fs::remove_file(dest);
+        return Err(format!("download was {got} bytes, expected {expect}."));
     }
     Ok(())
 }
