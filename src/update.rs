@@ -179,10 +179,15 @@ pub fn download(release: &Release, tx: &Sender<WorkerMsg>) -> Result<PathBuf, St
 /// nobody sees, leaving the user with no update and no clue.
 pub fn spawn_setup(setup: &Path) -> Result<(), String> {
     let pid = std::process::id();
+    // inno re-launches itself out of a temp folder, so this copy is free to
+    // delete once the setup is done with it
     let script = format!(
         "Wait-Process -Id {pid} -ErrorAction SilentlyContinue; \
-         Start-Process -FilePath '{}' -Verb RunAs \
-         -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'",
+         $p = Start-Process -FilePath '{}' -Verb RunAs -PassThru \
+         -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'; \
+         $p.WaitForExit(); \
+         Remove-Item '{}' -Force -ErrorAction SilentlyContinue",
+        setup.display(),
         setup.display()
     );
     Command::new("powershell")
