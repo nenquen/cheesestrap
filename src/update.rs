@@ -86,6 +86,10 @@ pub fn pretty(version: &str) -> String {
 }
 
 /// Pulls the version out of `Cheesestrap-Setup-2026-10-08-1415-x64.exe`. The
+fn header_num(res: &reqwest::blocking::Response, name: &str) -> Option<u64> {
+    res.headers().get(name)?.to_str().ok()?.parse().ok()
+}
+
 /// tag itself is always just "release", so the asset name is what carries it.
 fn version_from_asset(name: &str) -> Option<String> {
     let rest = name.strip_prefix("Cheesestrap-Setup-")?;
@@ -101,16 +105,39 @@ fn version_from_asset(name: &str) -> Option<String> {
 }
 
 /// `Ok(None)` means we are already on the newest release.
-pub fn check() -> Result<Option<Release>, String> {
-    let body = crate::net::client()
+///
+/// The rate limit is unauthenticated, 60 requests an hour for the whole ip
+/// address, so it is worth reading the headers back out. A silent 403 that we
+/// treat as "no update" is how a version check quietly dies.
+pub fn check(tx: &Sender<WorkerMsg>) -> Result<Option<Release>, String> {
+    let res = crate::net::client()
         .get(API)
         .header("accept", "application/vnd.github+json")
         .send()
-        .map_err(|e| format!("could not reach github: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("version check failed: {e}"))?
-        .text()
-        .map_err(|e| format!("version check failed: {e}"))?;
+        .map_err(|e| format!("could not reach github: {e}"))?;
+
+    let remaining = header_num(&res, "x-ratelimit-remaining");
+    let reset = header_num(&res, "x-ratelimit-reset").unwrap_or(0);
+
+    if !res.status().is_success() {
+        if res.status().as_u16() == 403 && remaining == Some(0) {
+            let mins = reset.saturating_sub(crate::app::unix_now()) / 60 + 1;
+            let msg = format!("github rate limit reached, asks again in {mins} min.");
+            tx.send(WorkerMsg::Log(msg.clone())).ok();
+            return Err(msg);
+        }
+        return Err(format!("version check failed: {}", res.status()));
+    }
+    if let Some(left) = remaining {
+        if left <= 10 {
+            tx.send(WorkerMsg::Log(format!(
+                "github rate limit is down to {left} of 60 for this ip."
+            )))
+            .ok();
+        }
+    }
+
+    let body = res.text().map_err(|e| format!("version check failed: {e}"))?;
     let v: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| format!("bad release json: {e}"))?;
     let releases = v

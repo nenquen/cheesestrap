@@ -51,12 +51,16 @@ fn default_true() -> bool {
     true
 }
 
-/// How long a github answer stays good. Long enough that a normal week of
-/// launching the app costs a couple of requests, short enough that a release
-/// lands the same day.
-const CHECK_INTERVAL: u64 = 6 * 60 * 60;
+/// How long a github answer stays good.
+///
+/// GitHub allows 60 requests an hour per ip, so this has to exist at all, but
+/// it must stay short. Six hours meant a release could sit invisible all
+/// afternoon, and worse, a user whose cache was fresh could not see the very
+/// update that fixed whatever the cache was hiding. Half an hour is two
+/// requests an hour per user, which leaves plenty of headroom on the limit.
+const CHECK_INTERVAL: u64 = 30 * 60;
 
-fn unix_now() -> u64 {
+pub fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -346,7 +350,7 @@ impl App {
         // screen stays up in the meantime and a failure costs nothing.
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let r = crate::update::check();
+            let r = crate::update::check(&tx);
             let _ = tx.send(WorkerMsg::UpdateCheck(r));
         });
     }
@@ -581,8 +585,13 @@ impl App {
                     self.push_log("cheesestrap is up to date.".to_string());
                 }
                 WorkerMsg::UpdateCheck(Err(e)) => {
-                    // offline, throttled or github having a bad day. do not
-                    // move checked_at, so the next launch tries again.
+                    // Offline, throttled or github having a bad day. Count it
+                    // as a check anyway, otherwise every launch hammers a
+                    // server that already said no, and once the hour is up
+                    // nobody will be asking at all.
+                    self.checked_at = unix_now();
+                    self.checked_for = crate::update::current().to_string();
+                    self.save();
                     self.push_log(format!("update check skipped: {e}"));
                 }
                 WorkerMsg::UpdateDownloaded(Ok(path)) => {

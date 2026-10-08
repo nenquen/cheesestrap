@@ -63,6 +63,13 @@ version and the update check just compares the numbers.
 
 ### date based versions
 
+- the update check cache is 30 minutes instead of 6 hours. six hours meant a
+  release could sit invisible all afternoon, and a user whose cache was fresh
+  could not see the very update that fixed whatever the cache was hiding
+- a failed check now counts as a check too, otherwise every launch hammers a
+  github that already said no
+- the github rate limit headers are read back and logged when they run low, a
+  silent 403 is how a version check quietly dies
 - the version is the build time, no hand written number is left anywhere.
   `installer\stamp-version.ps1` computes it and the inno script and the binary
   both get it from there
