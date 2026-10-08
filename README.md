@@ -1,14 +1,23 @@
-# cheesestrap
+<div align="right">
+  <img src="assets/branding/macncheese-256.png" width="112" alt="Cheesestrap">
+</div>
 
-A small roblox client bootstrapper. No installer-based roblox, the client gets
-downloaded into our own `clients/` folder, updated before every launch.
+# Cheesestrap
+
+![build](https://github.com/nenquen/cheesestrap/actions/workflows/build.yml/badge.svg)
+![license](https://img.shields.io/badge/license-GPL--3.0-green)
+![rust](https://img.shields.io/badge/rust-stable-2024%20edition-orange)
+![platform](https://img.shields.io/badge/platform-windows-x64-0078D4)
+
+A small roblox client bootstrapper. No official installer, the client is
+downloaded into our own `clients/` folder and updated before every launch.
 
 The interface is a ratatui TUI painted inside our own window through egui, so
 there is no console and no terminal window behind it.
 
 ## build
 
-Needs a stable msvc toolchain, which `rust-toolchain.toml` pins for you.
+The toolchain is pinned in `rust-toolchain.toml`, msvc only.
 
 ```
 cargo build --release
@@ -33,7 +42,7 @@ branding logo, run it after changing the logo. The setup lands in
 
 ## where things go
 
-Everything lives next to the exe, which means under `C:\Program Files\Cheesestrap`:
+Everything lives next to the exe, so under `C:\Program Files\Cheesestrap`:
 
 - `clients/` downloaded roblox builds, one folder per version guid
 - `logs/` log files, only written when the setting is on
