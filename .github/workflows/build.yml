@@ -20,6 +20,15 @@ jobs:
           rustup show
           rustc -vV
 
+      # Before the build, the app reads its version out of the environment and
+      # the inno script refuses to run without one.
+      - name: Stamp the version
+        shell: pwsh
+        run: |
+          & installer\stamp-version.ps1
+          $v = ((Get-Content target\version.ini | Select-String '^Version=').Line).Split('=')[1].Trim()
+          "CHEESESTRAP_VERSION=$v" >> $env:GITHUB_ENV
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
@@ -52,7 +61,7 @@ jobs:
       - name: Build the setup exe
         shell: pwsh
         run: |
-          & $env:ISCC_EXE /Qp "installer\Cheesestrap.iss"
+          & $env:ISCC_EXE /Qp "/DMyAppVersion=$env:CHEESESTRAP_VERSION" "installer\Cheesestrap.iss"
 
       - name: Upload the app
         uses: actions/upload-artifact@v4
