@@ -382,87 +382,170 @@ pub fn edgewebview_dirs() -> Vec<PathBuf> {
     out
 }
 
+/// Registry key edge update uses to advertise the webview2 runtime.
+const WV2_CLIENT_KEY: &str =
+    "SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+
+/// What state the webview2 runtime is in on this machine.
+pub enum Webview2State {
+    /// The runtime is there and the files behind it exist.
+    Ok(String),
+    /// Nothing registered, the player has never had webview2 on this box.
+    Missing,
+    /// Registered but the folder it points at is gone. Edge updates have done
+    /// this: the files move to EdgeCore while the stale key stays behind, and
+    /// roblox trusts the key, finds no runtime, and shows the install dialog.
+    Broken {
+        version: String,
+        location: String,
+    },
+}
+
+/// Reads the runtime state. `HKLM` is checked through the 32 bit view too since
+/// that is where a per machine install of the x64 runtime registers itself.
+pub fn webview2_state() -> Webview2State {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let mut found: Option<(String, String)> = None;
+    let views = [
+        (HKEY_LOCAL_MACHINE, false),
+        (HKEY_LOCAL_MACHINE, true),
+        (HKEY_CURRENT_USER, false),
+    ];
+    for (hive, wow64) in views {
+        let hk = RegKey::predef(hive);
+        let path = if wow64 {
+            format!("SOFTWARE\\WOW6432Node\\{WV2_CLIENT_KEY}")
+        } else {
+            WV2_CLIENT_KEY.to_string()
+        };
+        let Ok(key) = hk.open_subkey(&path) else {
+            continue;
+        };
+        let version = key.get_value::<String, _>("pv").unwrap_or_default();
+        let location = key.get_value::<String, _>("location").unwrap_or_default();
+        if version.is_empty() && location.is_empty() {
+            continue;
+        }
+        // a key whose location actually holds the runtime wins outright
+        if !location.is_empty()
+            && PathBuf::from(&location)
+                .join("msedgewebview2.exe")
+                .exists()
+        {
+            return Webview2State::Ok(version);
+        }
+        found = Some((version, location));
+    }
+
+    match found {
+        Some((version, location)) => {
+            // no key pointed at real files, but edgecore may still have them
+            if let Some(p) = find_edgecore_runtime() {
+                return Webview2State::Ok(p);
+            }
+            Webview2State::Broken {
+                version,
+                location,
+            }
+        }
+        None => Webview2State::Missing,
+    }
+}
+
+/// Newer edge builds stash the shared binaries under EdgeCore/<version>, which
+/// is where the payload ended up on a box whose EdgeWebView folder got removed.
+fn find_edgecore_runtime() -> Option<String> {
+    for base in edgewebview_dirs() {
+        let core = base
+            .parent()
+            .map(|p| p.join("EdgeCore"))
+            .unwrap_or_else(|| base.clone());
+        let Ok(entries) = fs::read_dir(core) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let exe = e.path().join("msedgewebview2.exe");
+            if exe.exists() {
+                return e.file_name().to_str().map(|s| s.to_string());
+            }
+        }
+    }
+    None
+}
+
+const WV2_BOOTSTRAP: &str = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
+
+/// Downloads the evergreen webview2 runtime and installs it silently.
+///
+/// Returns the log lines it produced. The installer is signed by Microsoft and
+/// this needs admin, which the app already elevates for.
+pub fn install_webview2_runtime(tx: &Sender<WorkerMsg>) -> Result<Vec<String>, String> {
+    tx.send(WorkerMsg::Log(
+        "downloading the webview2 runtime installer...".to_string(),
+    ))
+    .ok();
+
+    let tmp = std::env::temp_dir().join("cheesestrap-webview2-runtime.exe");
+    let bytes = http()
+        .get(WV2_BOOTSTRAP)
+        .send()
+        .map_err(|e| format!("could not reach microsoft: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("download failed: {e}"))?
+        .bytes()
+        .map_err(|e| format!("download failed: {e}"))?;
+    fs::write(&tmp, &bytes).map_err(|e| format!("could not write the installer: {e}"))?;
+
+    tx.send(WorkerMsg::Log(format!(
+        "running the installer ({} MB)...",
+        bytes.len() / 1_048_576
+    )))
+    .ok();
+
+    // --silent hides the UI, --system-level puts the runtime in for everyone
+    let out = Command::new(&tmp)
+        .args(["/silent", "/install"])
+        .output()
+        .map_err(|e| format!("could not start the installer: {e}"))?;
+    let _ = fs::remove_file(&tmp);
+
+    let log = String::from_utf8_lossy(&out.stdout).to_string();
+    let mut lines: Vec<String> = log
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    if !out.status.success() {
+        lines.push(format!("installer exited with {}", out.status));
+    }
+    match webview2_state() {
+        Webview2State::Ok(v) => {
+            let msg = if v.is_empty() {
+                "webview2 runtime installed.".to_string()
+            } else {
+                format!("webview2 runtime installed, version {v}.")
+            };
+            tx.send(WorkerMsg::Log(msg.clone())).ok();
+            lines.push(msg);
+            Ok(lines)
+        }
+        _ => {
+            // the bootstrapper may have handed off to an msiexec that outlived
+            // us, so say so instead of claiming a hard failure
+            lines.push("installer finished, runtime still not detected yet.".to_string());
+            Ok(lines)
+        }
+    }
+}
+
 pub fn has_clients() -> bool {
     !installed_guids().is_empty()
 }
 
-pub fn has_webview_traces() -> bool {
-    if let Some(base) = clients_dir() {
-        if let Ok(entries) = fs::read_dir(&base) {
-            for v in entries.flatten() {
-                if !v.path().is_dir() {
-                    continue;
-                }
-                if let Ok(files) = fs::read_dir(v.path()) {
-                    for f in files.flatten() {
-                        if let Some(name) = f.file_name().to_str() {
-                            if name.to_ascii_lowercase().contains("webview") {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    edgewebview_dirs().into_iter().any(|d| d.exists())
-}
 
-pub enum Removed {
-    File(String),
-    Dir(String),
-    Denied(String),
-}
-
-/// Deletes every webview2 trace: our bundled loader files plus the
-/// standalone system runtime folders (best effort, may need admin).
-pub fn remove_webview_everywhere() -> Vec<Removed> {
-    let mut out: Vec<Removed> = Vec::new();
-    if let Some(base) = clients_dir() {
-        if let Ok(entries) = fs::read_dir(&base) {
-            for v in entries.flatten() {
-                let vdir = v.path();
-                if !vdir.is_dir() {
-                    continue;
-                }
-                if let Ok(files) = fs::read_dir(&vdir) {
-                    for f in files.flatten() {
-                        if let Some(name) = f.file_name().to_str() {
-                            if name.to_ascii_lowercase().contains("webview") {
-                                if fs::remove_file(f.path()).is_ok() {
-                                    out.push(Removed::File(name.to_string()));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    for dir in edgewebview_dirs() {
-        if !dir.exists() {
-            continue;
-        }
-        if fs::remove_dir_all(&dir).is_ok() {
-            out.push(Removed::Dir("edgewebview runtime folder".to_string()));
-            continue;
-        }
-        let _ = Command::new("taskkill")
-            .args(["/F", "/IM", "msedgewebview2.exe"])
-            .output();
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        if fs::remove_dir_all(&dir).is_ok() {
-            out.push(Removed::Dir(
-                "edgewebview runtime folder (after closing it)".to_string(),
-            ));
-        } else {
-            out.push(Removed::Denied(
-                "edgewebview runtime folder (close edge and retry)".to_string(),
-            ));
-        }
-    }
-    out
-}
 
 pub fn loader_dll_path(guid: &str) -> Option<PathBuf> {
     clients_dir().map(|d| d.join(guid).join("WebView2Loader.dll"))

@@ -115,8 +115,8 @@ impl CheeseApp {
                                     app.save();
                                 }
                                 2 => {
-                                    if app.can_clean_webview {
-                                        app.delete_webview2();
+                                    if !app.webview_ok {
+                                        app.repair_webview2();
                                     }
                                 }
                                 3 => {
@@ -167,8 +167,8 @@ impl CheeseApp {
                 self.app.settings_idx = i;
                 self.app.focus = Focus::Content;
                 if i == 2 {
-                    if self.app.can_clean_webview {
-                        self.app.delete_webview2();
+                    if !self.app.webview_ok {
+                        self.app.repair_webview2();
                     }
                 } else if i == 3 {
                     if self.app.can_uninstall {

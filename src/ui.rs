@@ -260,7 +260,15 @@ fn draw_settings(
             },
             true,
         ),
-        ("delete webview2", "".to_string(), app.can_clean_webview),
+        (
+            "repair webview2",
+            if app.webview_ok {
+                "".to_string()
+            } else {
+                "needed".to_string()
+            },
+            !app.webview_ok,
+        ),
         ("uninstall roblox", "".to_string(), app.can_uninstall),
     ];
     let label_w = rows.iter().map(|(l, _, _)| l.len()).max().unwrap_or(0);
@@ -307,7 +315,7 @@ fn draw_settings(
         let desc = match i {
             0 => "write every log line to a file.",
             1 => "show the key hints at the bottom.",
-            2 => "delete every webview2 trace on this pc.",
+            2 => "download and install the webview2 runtime roblox needs.",
             _ => "delete everything roblox from this pc.",
         };
         let dy = area.y + 1 + rows.len() as u16 + 1;

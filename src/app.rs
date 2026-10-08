@@ -22,6 +22,7 @@ pub enum WorkerMsg {
     InstallDone(Result<String, String>),
     Launched(Result<String, String>),
     Uninstalled(Vec<String>),
+    WebviewFixed(Vec<String>),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -73,7 +74,7 @@ pub struct App {
     pub show_hints: bool,
     pub close_at: Option<std::time::Instant>,
     pub can_uninstall: bool,
-    pub can_clean_webview: bool,
+    pub webview_ok: bool,
     pub log_view_end: Option<usize>,
     pub hover: Option<(u8, usize)>,
     pub protocol_url: Option<String>,
@@ -102,7 +103,7 @@ impl App {
             show_hints: saved.as_ref().map(|s| s.show_hints).unwrap_or(true),
             close_at: None,
             can_uninstall: roblox::has_clients(),
-            can_clean_webview: roblox::has_webview_traces(),
+            webview_ok: matches!(roblox::webview2_state(), roblox::Webview2State::Ok(_)),
             log_view_end: None,
             hover: None,
             protocol_url: None,
@@ -110,7 +111,10 @@ impl App {
             editing_args: false,
             installed: None,
             latest: None,
-            log: vec!["welcome to cheesestrap.".to_string()],
+            log: vec![
+                "welcome to cheesestrap.".to_string(),
+                App::webview2_summary(),
+            ],
             busy: false,
             ctx_close_requested: false,
             tx,
@@ -128,7 +132,7 @@ impl App {
 
     pub fn refresh_flags(&mut self) {
         self.can_uninstall = roblox::has_clients();
-        self.can_clean_webview = roblox::has_webview_traces();
+        self.webview_ok = matches!(roblox::webview2_state(), roblox::Webview2State::Ok(_));
     }
 
     pub fn uninstall_roblox(&mut self) {
@@ -152,26 +156,102 @@ impl App {
         });
     }
 
-    pub fn delete_webview2(&mut self) {
-        let removed = roblox::remove_webview_everywhere();
-        if removed.is_empty() {
-            self.push_log("no webview2 traces found.".to_string());
-        } else {
-            for r in removed {
-                match r {
-                    roblox::Removed::File(name) => {
-                        self.push_log(format!("removed: {name}"))
-                    }
-                    roblox::Removed::Dir(name) => {
-                        self.push_log(format!("removed: {name}"))
-                    }
-                    roblox::Removed::Denied(name) => self.push_log(format!(
-                        "access denied: {name} (already admin?)"
-                    )),
-                }
+    /// Kills the stale edge update keys that point at a folder edge deleted,
+    /// so a reinstall is not mistaken for an up to date runtime.
+    fn clear_stale_webview_keys() -> usize {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        const KEY: &str =
+            "SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+        let mut n = 0;
+        for (hive, sub) in [
+            (HKEY_LOCAL_MACHINE, KEY.to_string()),
+            (
+                HKEY_LOCAL_MACHINE,
+                format!("SOFTWARE\\WOW6432Node\\{KEY}"),
+            ),
+            (HKEY_CURRENT_USER, KEY.to_string()),
+        ] {
+            let hk = RegKey::predef(hive);
+            // only drop it when the folder it names is really gone, never a
+            // working install
+            let location = hk
+                .open_subkey(&sub)
+                .ok()
+                .and_then(|k| k.get_value::<String, _>("location").ok())
+                .unwrap_or_default();
+            if location.is_empty() {
+                continue;
+            }
+            if std::path::Path::new(&location).join("msedgewebview2.exe").exists() {
+                continue;
+            }
+            if hk.delete_subkey_all(&sub).is_ok() {
+                n += 1;
             }
         }
-        self.refresh_flags();
+        n
+    }
+
+    /// Downloads and installs the webview2 runtime, after wiping any stale
+    /// registration that would make roblox think it is already there.
+    pub fn repair_webview2(&mut self) {
+        if self.busy {
+            return;
+        }
+        self.busy = true;
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            match Self::clear_stale_webview_keys() {
+                0 => {
+                    let _ = tx.send(WorkerMsg::Log(
+                        "no stale webview2 registration found.".to_string(),
+                    ));
+                }
+                n => {
+                    let _ = tx.send(WorkerMsg::Log(format!(
+                        "cleared {n} stale webview2 registration(s)."
+                    )));
+                }
+            }
+            match roblox::install_webview2_runtime(&tx) {
+                Ok(lines) => {
+                    let _ = tx.send(WorkerMsg::WebviewFixed(lines));
+                }
+                Err(e) => {
+                    let _ = tx.send(WorkerMsg::WebviewFixed(vec![format!(
+                        "repair failed: {e}"
+                    )]));
+                }
+            }
+        });
+    }
+
+    /// One line describing the runtime, for the settings row and the log.
+    pub fn webview2_summary() -> String {
+        match roblox::webview2_state() {
+            roblox::Webview2State::Ok(v) if v.is_empty() => "webview2 runtime: installed".to_string(),
+            roblox::Webview2State::Ok(v) => format!("webview2 runtime: {v}"),
+            roblox::Webview2State::Missing => {
+                "webview2 runtime: not installed, roblox will ask for it".to_string()
+            }
+            roblox::Webview2State::Broken {
+                version,
+                location,
+            } => {
+                let v = if version.is_empty() {
+                    "unknown".to_string()
+                } else {
+                    version
+                };
+                let l = if location.is_empty() {
+                    "an empty path".to_string()
+                } else {
+                    location
+                };
+                format!("webview2 runtime: broken, {v} registered but {l} is gone")
+            }
+        }
     }
 
     pub fn push_log(&mut self, line: impl Into<String>) {
@@ -344,6 +424,14 @@ impl App {
                     for line in lines {
                         self.push_log(line);
                     }
+                    self.refresh_flags();
+                }
+                WorkerMsg::WebviewFixed(lines) => {
+                    self.busy = false;
+                    for line in lines {
+                        self.push_log(line);
+                    }
+                    self.push_log(Self::webview2_summary());
                     self.refresh_flags();
                 }
             }
