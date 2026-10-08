@@ -12,3 +12,5 @@ this build:
 - webview2 is detected and repaired instead of the broken delete button that
   used to leave a stale registration behind
 - data lives next to the exe: clients/, logs/, settings.json
+
+built with opencode, https://opencode.ai

@@ -55,6 +55,12 @@ push, and uploads both as artifacts.
 release with the setup exe attached. Push the `release` tag to cut one, the
 release notes come from `installer/notes.txt`.
 
+## Credits
+
+Built with help from [OpenCode](https://opencode.ai).
+
+<a href="https://opencode.ai" target="_blank"><img src="https://opencode.ai/apple-touch-icon-v3.png" width="72" height="72" alt="OpenCode" /></a>
+
 ## Contributors
 
 <img src="https://contrib.rocks/image?repo=nenquen/cheesestrap" alt="Contributors" />
