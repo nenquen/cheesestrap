@@ -63,9 +63,11 @@ jobs:
           $toml = Get-Content Cargo.toml -Raw
           if ($toml -notmatch '(?m)^version\s*=\s*"([^"]+)"') { throw "no version in Cargo.toml" }
           $v = $Matches[1]
+          # these must go to GITHUB_OUTPUT, not GITHUB_ENV, or the steps that
+          # reference them as ${{ steps.ver.outputs.* }} see nothing
           "version=$v" >> $env:GITHUB_OUTPUT
           "setup=Cheesestrap-Setup-$v-x64.exe" >> $env:GITHUB_OUTPUT
-          "title=cheesestrap $v" >> $env:GITHUB_ENV
+          "title=cheesestrap $v" >> $env:GITHUB_OUTPUT
           Write-Output "shipping $v"
 
       # Release notes are the matching changelog entry in the readme, so what
@@ -98,10 +100,11 @@ jobs:
             Write-Warning "no changelog entry for $env:VERSION, publishing without notes"
             $notes = "no notes for $env:VERSION"
           }
+          # heredoc form, nothing but the notes between the markers or they
+          # end up in the release body
           "body<<CHANGELOG_EOF" >> $env:GITHUB_OUTPUT
-          "body"         >> $env:GITHUB_OUTPUT
-          $notes         >> $env:GITHUB_OUTPUT
-          "CHANGELOG_EOF" >> $env:GITHUB_OUTPUT
+          $notes          >> $env:GITHUB_OUTPUT
+          "CHANGELOG_EOF"  >> $env:GITHUB_OUTPUT
 
       # gh is preinstalled and picks up GITHUB_TOKEN, so the same tag being
       # pushed twice updates the existing release instead of failing.
@@ -121,8 +124,16 @@ jobs:
           $existing = gh release view $env:TAG --json tagName --jq .tagName 2>$null
           if ($LASTEXITCODE -eq 0 -and $existing) {
             gh release upload $env:TAG $exe --clobber
-            gh release edit $env:TAG --title $env:TITLE --notes $env:NOTES
+            # the tag is permanent so old setups pile up otherwise, and two
+            # of them side by side is just confusing for whoever downloads
+            foreach ($a in (gh release view $env:TAG --json assets --jq ".assets[].name")) {
+              if ($a -like "Cheesestrap-Setup-*.exe" -and $a -ne $env:ASSET) {
+                Write-Output "dropping stale asset $a"
+                gh release delete-asset $env:TAG $a --yes
+              }
+            }
+            gh release edit $env:TAG --title $env:TITLE --notes $env:NOTES --latest
           } else {
             gh release create $env:TAG $exe --title $env:TITLE --notes $env:NOTES --latest
           }
-          gh release view $env:TAG
+          gh release view $env:TAG --json tagName,name,assets --jq '.'
