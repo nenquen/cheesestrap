@@ -30,6 +30,8 @@ jobs:
 
       # The GitHub runner image ships Inno Setup, but install it if a future
       # image drops it, otherwise ISCC just is not there.
+      # ISCC has no -v/--version flag, probing it with one only prints the
+      # usage screen and exits 1, so just test for the file.
       - name: Ensure Inno Setup 6
         shell: pwsh
         run: |
@@ -38,14 +40,19 @@ jobs:
             choco install innosetup -y --no-progress
             $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           }
-          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found" }
-          & $iscc -v
+          if (-not (Test-Path $iscc)) {
+            $found = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*" -Recurse -Filter ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $found) { throw "ISCC.exe not found" }
+            "ISCC_EXE=$($found.FullName)" >> $env:GITHUB_ENV
+          } else {
+            "ISCC_EXE=$iscc" >> $env:GITHUB_ENV
+          }
+          Write-Output "using $env:ISCC_EXE"
 
       - name: Build the setup exe
-        working-directory: installer
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" Cheesestrap.iss
+          & $env:ISCC_EXE /Qp "installer\Cheesestrap.iss"
 
       - name: Upload the app
         uses: actions/upload-artifact@v4
