@@ -102,7 +102,7 @@ pub fn draw(f: &mut Frame, app: &mut App, hot: &mut Vec<HotZone>) {
 
         f.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                format!("  v{} tab: panel   up/down: move   enter: go   esc: back", env!("CARGO_PKG_VERSION")),
+                format!("  v{} tab: panel   up/down: move   enter: go   esc: back", crate::update::current()),
                 Style::default().fg(DIM),
             )])),
             rows[1],

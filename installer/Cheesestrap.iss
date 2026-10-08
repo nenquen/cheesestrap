@@ -1,9 +1,14 @@
 ; Cheesestrap installer. Build with: iscc installer\Cheesestrap.iss
 
 #define MyAppName "cheesestrap"
-; keep this in sync with Cargo.toml, they are bumped together
-#define MyAppVersion "1.0.10"
 #define MyAppExe "Cheesestrap.exe"
+
+; The version is the minute the build started, stamped by
+; installer\stamp-version.ps1 and passed in as /DMyAppVersion=<v>.
+; Format is 1.0.YYYYMMDD.HHMM in UTC, which sorts numerically.
+#ifndef MyAppVersion
+  #error no version given, run installer\build-release.ps1 instead of calling iscc by hand
+#endif
 
 [Setup]
 AppId={{4C4F7B38-F25B-4B4C-8D62-11543D6A8F5D}

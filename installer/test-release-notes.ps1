@@ -1,40 +1,45 @@
 # Local dry run of the changelog scraping the release workflow does, so a
 # missing entry is caught before pushing the release tag.
-# Run: powershell -File installer\test-release-notes.ps1 [-Version 1.0.2]
-param([string]$Version = "")
+#
+# The version is generated at build time now, so this cannot look for a heading
+# that matches it. It takes the newest entry under ## Changelog, same as the
+# workflow does.
+#
+# Run: powershell -File installer\test-release-notes.ps1
 
-if (-not $Version) {
-    $toml = Get-Content (Join-Path $PSScriptRoot "..\Cargo.toml") -Raw
-    if ($toml -notmatch '(?m)^version\s*=\s*"([^"]+)"') { throw "no version in Cargo.toml" }
-    $Version = $Matches[1]
-}
+$ErrorActionPreference = "Stop"
 
-$lines = Get-Content (Join-Path $PSScriptRoot "..\README.md")
+$readme = Join-Path $PSScriptRoot "..\README.md"
+$lines = Get-Content $readme
+
+$start = ($lines | Select-String '^##\s+Changelog\s*$' | Select-Object -First 1).LineNumber
+if (-not $start) { Write-Error "no ## Changelog heading in README.md"; exit 1 }
+
 $body = @()
 $inside = $false
-$found = $false
-foreach ($line in $lines) {
-    if ($line -match '^(#{2,3})\s+(.*)$') {
-        $level = $Matches[1].Length
-        $heading = $Matches[2].Trim()
-        # a new heading ends the entry, anything shallower ends the changelog
-        if ($inside -and $level -le 3) { break }
-        if (-not $inside -and $level -eq 3 -and $heading -eq $Version) {
-            $inside = $true
-            $found = $true
-            continue
-        }
+$heading = ""
+foreach ($line in $lines[$start..($lines.Count - 1)]) {
+    if ($line -match '^##\s') { break }
+    if ($line -match '^###\s') {
+        if ($inside) { break }        # second entry, we only wanted the first
+        $inside = $true
+        $heading = $line.Substring(3).Trim()
         continue
     }
     if ($inside) { $body += $line }
 }
 
-if (-not $found) {
-    Write-Error "no changelog entry for $Version, the release would ship without notes"
+$notes = ($body -join "`n").Trim()
+if (-not $notes) {
+    Write-Error "the newest changelog entry under ## Changelog is empty"
     exit 1
 }
 
-$notes = ($body -join "`n").Trim()
-Write-Output "version: $Version"
+$stamp = Join-Path $PSScriptRoot "..\target\version.ini"
+if (Test-Path $stamp) {
+    $v = ((Get-Content $stamp | Select-String '^Version=').Line).Split('=')[1].Trim()
+    Write-Output "this build: $v"
+}
+Write-Output "entry: $heading"
 Write-Output "notes:"
 Write-Output $notes

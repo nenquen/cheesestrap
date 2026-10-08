@@ -1,6 +1,8 @@
 [package]
 name = "cheesestrap"
-version = "1.0.10"
+# Cargo insists on a version here but nothing reads it. The real one is the
+# build stamp, see installer\stamp-version.ps1. Do not bump this.
+version = "1.0.0"
 edition = "2021"
 
 [dependencies]

@@ -9,9 +9,14 @@ use crate::app::WorkerMsg;
 
 const API: &str = "https://api.github.com/repos/nenquen/cheesestrap/releases?per_page=10";
 
-/// The one place the version is read from, so cargo stays the single source.
+/// The running version.
+///
+/// Normally the date based stamp that `installer\stamp-version.ps1` puts in the
+/// environment, so it is when this binary was built. Falls back to the crate
+/// version for a plain `cargo build` with no stamp, which is only ever a local
+/// dev build.
 pub fn current() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+    option_env!("CHEESESTRAP_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
 /// The self update replaces our own exe, which only works from the installed

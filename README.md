@@ -13,8 +13,12 @@ there is no console and no terminal window behind it.
 The toolchain is pinned in `rust-toolchain.toml`, msvc only.
 
 ```
-cargo build --release
+powershell -ExecutionPolicy Bypass -File installer\build-release.ps1
 ```
+
+That stamps the version, builds the exe and wraps it in a setup in one go. A
+plain `cargo build --release` works too but then reports the crate version
+instead of a build stamp.
 
 The exe lands in `target/release/cheesestrap.exe` as a gui binary. The icon is
 built at compile time from `assets/branding/macncheese-512.png`.
@@ -26,15 +30,13 @@ Needs Inno Setup 6.
 ```
 cd installer
 powershell -ExecutionPolicy Bypass -File make-wizard-art.ps1
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" Cheesestrap.iss
+powershell -ExecutionPolicy Bypass -File stamp-version.ps1
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp /DMyAppVersion=1.0.20261008.1400 Cheesestrap.iss
 ```
 
 `make-wizard-art.ps1` regenerates `wizard.bmp` and `wizard-small.bmp` from the
 branding logo, run it after changing the logo. The setup lands in
 `installer/output/`.
-
-Every change bumps the version, in `Cargo.toml` and in the `MyAppVersion`
-define at the same time, and gets a changelog entry. See `AGENTS.md`.
 
 ## Where things go
 
@@ -55,9 +57,18 @@ notes come from the top entry of the changelog below.
 
 ## Changelog
 
-### 1.0.10
+Versions are the moment the build happened, `1.0.YYYYMMDD.HHMM` in UTC. Nothing
+to bump, every build is its own version and the update check just compares the
+numbers.
 
-- the update cache remembers which build wrote it, so an app that was just
+### date based versions
+
+- the version is stamped at build time, `installer\stamp-version.ps1` writes
+  `target\version.ini` and the inno script and the binary both read it, so
+  there is no hand written number left anywhere
+- release notes take the newest changelog entry instead of matching a version,
+  since the version is not known until the build starts
+- the update cache records which build wrote it, so an app that was just
   installed always looks again instead of inheriting the previous version's
   timestamp and reporting up to date without ever asking github
 
@@ -92,11 +103,6 @@ notes come from the top entry of the changelog below.
   `.cargo/config.toml` left over from the mingw days
 - rewrote the log wrapping, it was doing a hand rolled prepend per line
 - clippy is clean
-
-### 1.0.5
-
-- a guard in the release workflow refuses to publish when the version did not
-  move, so a release can no longer silently overwrite the previous one
 - AGENTS.md spells out the bump and changelog rules for whoever works on this next
 
 ### 1.0.4

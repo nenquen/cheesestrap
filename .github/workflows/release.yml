@@ -1,8 +1,8 @@
 name: release
 
 # The tag is literally "release", so pushing it again is what ships the next
-# version. The number that matters lives in the setup file name, which the
-# workflow reads out of Cargo.toml.
+# build. The version is not in the tag and not in Cargo.toml either, it is the
+# minute this workflow started, stamped before anything gets built.
 on:
   push:
     tags:
@@ -23,6 +23,24 @@ jobs:
         run: |
           rustup show
           rustc -vV
+
+      # Before the build, because cargo reads the version out of the
+      # environment and the inno script reads the ini this writes. One number
+      # for the whole run, and it is the time the build started.
+      - name: Stamp the version
+        id: ver
+        shell: pwsh
+        run: |
+          & installer\stamp-version.ps1
+          $line = (Get-Content target\version.ini | Select-String '^Version=').Line
+          if (-not $line) { throw "stamp wrote no version" }
+          $v = $line.Split('=')[1].Trim()
+          if ($v -notmatch '^\d+\.\d+\.\d{8}\.\d{4}$') { throw "bad version stamp: $v" }
+          "CHEESESTRAP_VERSION=$v" >> $env:GITHUB_ENV
+          "version=$v"                   >> $env:GITHUB_OUTPUT
+          "setup=Cheesestrap-Setup-$v-x64.exe" >> $env:GITHUB_OUTPUT
+          "title=cheesestrap $v"         >> $env:GITHUB_OUTPUT
+          Write-Output "shipping $v"
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -52,28 +70,10 @@ jobs:
       - name: Build the setup exe
         shell: pwsh
         run: |
-          & $env:ISCC_EXE /Qp "installer\Cheesestrap.iss"
+          & $env:ISCC /Qp "/DMyAppVersion=$env:CHEESESTRAP_VERSION" "installer\Cheesestrap.iss"
 
-      # Cargo.toml is the source of truth for the version, the tag is just
-      # "release" so it cannot be trusted to carry the number.
-      - name: Read the version
-        id: ver
-        shell: pwsh
-        run: |
-          $toml = Get-Content Cargo.toml -Raw
-          if ($toml -notmatch '(?m)^version\s*=\s*"([^"]+)"') { throw "no version in Cargo.toml" }
-          $v = $Matches[1]
-          # these must go to GITHUB_OUTPUT, not GITHUB_ENV, or the steps that
-          # reference them as ${{ steps.ver.outputs.* }} see nothing
-          "version=$v" >> $env:GITHUB_OUTPUT
-          "setup=Cheesestrap-Setup-$v-x64.exe" >> $env:GITHUB_OUTPUT
-          "title=cheesestrap $v" >> $env:GITHUB_OUTPUT
-          Write-Output "shipping $v"
-
-      # Every change bumps the version, no exceptions. Republishing the same
-      # number would quietly overwrite a good release, so refuse to do it.
-      # A previous run that died before publishing leaves no asset behind and
-      # can still be retried.
+      # The version names itself, so this only trips when the tag was pushed
+      # twice inside one minute. Refuse rather than overwrite.
       - name: "Guard: the version has to move"
         shell: pwsh
         env:
@@ -83,40 +83,34 @@ jobs:
         run: |
           $assets = gh release view release --json assets --jq ".assets[].name" 2>$null
           if ($LASTEXITCODE -eq 0 -and $assets -contains $env:ASSET) {
-            throw "$($env:ASSET) is already published. bump the version in Cargo.toml and in the MyAppVersion define, add a changelog entry, and push again."
+            throw "$($env:ASSET) is already published, this tag went out twice in the same minute."
           }
           Write-Output "version $($env:VERSION) has not shipped yet, good"
 
-      # Release notes are the matching changelog entry in the readme, so what
-      # gets published is exactly what the readme claims. Line based rather
-      # than one regex, .NET lazy quantifiers did not want to cooperate here.
-      - name: Pull the changelog entry out of the readme
+      # Release notes are the newest entry in the readme changelog. The heading
+      # is whatever we wrote, the version is generated at build time and cannot
+      # be a heading we typed in advance, so take the first entry instead of
+      # looking for a match.
+      - name: Take the newest changelog entry from the readme
         id: notes
         shell: pwsh
-        env:
-          VERSION: ${{ steps.ver.outputs.version }}
         run: |
+          $lines = Get-Content README.md
+          $start = ($lines | Select-String '^##\s+Changelog\s*$' | Select-Object -First 1).LineNumber
+          if (-not $start) { throw "no ## Changelog heading in README.md" }
           $body = @()
           $inside = $false
-          $found = $false
-          foreach ($line in (Get-Content README.md)) {
-            if ($line -match '^(#{2,3})\s+(.*)$') {
-              $level = $Matches[1].Length
-              $heading = $Matches[2].Trim()
-              if ($inside -and $level -le 3) { break }
-              if (-not $inside -and $level -eq 3 -and $heading -eq $env:VERSION) {
-                $inside = $true
-                $found = $true
-              }
+          foreach ($line in $lines[$start..($lines.Count - 1)]) {
+            if ($line -match '^##\s') { break }
+            if ($line -match '^###\s') {
+              if ($inside) { break }   # stop at the second entry
+              $inside = $true
               continue
             }
             if ($inside) { $body += $line }
           }
           $notes = ($body -join "`n").Trim()
-          if (-not $found) {
-            Write-Warning "no changelog entry for $env:VERSION, publishing without notes"
-            $notes = "no notes for $env:VERSION"
-          }
+          if (-not $notes) { $notes = "no notes for this build" }
           # heredoc form, nothing but the notes between the markers or they
           # end up in the release body
           "body<<CHANGELOG_EOF" >> $env:GITHUB_OUTPUT
@@ -141,8 +135,7 @@ jobs:
           $existing = gh release view $env:TAG --json tagName --jq .tagName 2>$null
           if ($LASTEXITCODE -eq 0 -and $existing) {
             gh release upload $env:TAG $exe --clobber
-            # the tag is permanent so old setups pile up otherwise, and two
-            # of them side by side is just confusing for whoever downloads
+            # one setup per release, the app always points people at the newest
             foreach ($a in (gh release view $env:TAG --json assets --jq ".assets[].name")) {
               if ($a -like "Cheesestrap-Setup-*.exe" -and $a -ne $env:ASSET) {
                 Write-Output "dropping stale asset $a"

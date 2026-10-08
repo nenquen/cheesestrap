@@ -11,14 +11,16 @@ use std::sync::mpsc::Sender;
 
 use crate::app::WorkerMsg;
 
-pub const USER_AGENT: &str = concat!("Cheesestrap/", env!("CARGO_PKG_VERSION"));
+pub fn user_agent() -> String {
+    format!("Cheesestrap/{}", crate::update::current())
+}
 
 pub fn client() -> &'static reqwest::blocking::Client {
     static C: std::sync::OnceLock<reqwest::blocking::Client> =
         std::sync::OnceLock::new();
     C.get_or_init(|| {
         reqwest::blocking::Client::builder()
-            .user_agent(USER_AGENT)
+            .user_agent(user_agent())
             // a total timeout would cut off the multi hundred megabyte roblox
             // download on a slow line, but a connect timeout only covers the
             // part that can hang forever on a bad network
