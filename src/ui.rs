@@ -181,11 +181,15 @@ fn draw_notice(
             Style::default().fg(BG).bg(SELECT).add_modifier(Modifier::BOLD),
         ),
     ]));
+    // the button is the line we just pushed, count it instead of guessing an
+    // offset off the panel height. off by one here and the click misses the
+    // button entirely while it still lights up on hover.
+    let button_row = rect.y + 1 + lines.len() as u16 - 1;
     f.render_widget(Paragraph::new(lines).block(panel("update available")), rect);
 
     hot.push(HotZone {
         x: rect.x + 1 + x as u16,
-        y: rect.y + h - 2,
+        y: button_row,
         w: label.len() as u16 + 2,
         action: HotAction::Notice(0),
     });

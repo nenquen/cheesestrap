@@ -55,6 +55,11 @@ notes come from the top entry of the changelog below.
 
 ## Changelog
 
+### 1.0.8
+
+- the update button was one row below where it was drawn, so clicking it did
+  nothing and the only way through was the enter key
+
 ### 1.0.7
 
 - the status box shows the running cheesestrap version
