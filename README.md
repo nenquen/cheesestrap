@@ -33,6 +33,9 @@ powershell -ExecutionPolicy Bypass -File make-wizard-art.ps1
 branding logo, run it after changing the logo. The setup lands in
 `installer/output/`.
 
+Every change bumps the version, in `Cargo.toml` and in the `MyAppVersion`
+define at the same time, and gets a changelog entry. See `AGENTS.md`.
+
 ## Where things go
 
 Everything lives next to the exe, so under `C:\Program Files\Cheesestrap`:
@@ -51,6 +54,12 @@ release with the setup exe attached. Push the `release` tag to cut one, the
 notes come from the top entry of the changelog below.
 
 ## Changelog
+
+### 1.0.5
+
+- a guard in the release workflow refuses to publish when the version did not
+  move, so a release can no longer silently overwrite the previous one
+- AGENTS.md spells out the bump and changelog rules for whoever works on this next
 
 ### 1.0.4
 

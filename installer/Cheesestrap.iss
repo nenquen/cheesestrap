@@ -2,7 +2,7 @@
 
 #define MyAppName "cheesestrap"
 ; keep this in sync with Cargo.toml, they are bumped together
-#define MyAppVersion "1.0.4"
+#define MyAppVersion "1.0.5"
 #define MyAppExe "Cheesestrap.exe"
 
 [Setup]

@@ -70,6 +70,23 @@ jobs:
           "title=cheesestrap $v" >> $env:GITHUB_OUTPUT
           Write-Output "shipping $v"
 
+      # Every change bumps the version, no exceptions. Republishing the same
+      # number would quietly overwrite a good release, so refuse to do it.
+      # A previous run that died before publishing leaves no asset behind and
+      # can still be retried.
+      - name: "Guard: the version has to move"
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          ASSET: ${{ steps.ver.outputs.setup }}
+        run: |
+          $assets = gh release view release --json assets --jq ".assets[].name" 2>$null
+          if ($LASTEXITCODE -eq 0 -and $assets -contains $env:ASSET) {
+            throw "$($env:ASSET) is already published. bump the version in Cargo.toml and in the MyAppVersion define, add a changelog entry, and push again."
+          }
+          Write-Output "version $($env:VERSION) has not shipped yet, good"
+
       # Release notes are the matching changelog entry in the readme, so what
       # gets published is exactly what the readme claims. Line based rather
       # than one regex, .NET lazy quantifiers did not want to cooperate here.
