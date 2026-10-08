@@ -52,6 +52,11 @@ notes come from the top entry of the changelog below.
 
 ## Changelog
 
+### 1.0.4
+
+- updates are mandatory now, there is no later and no way past it
+- the update screen just says what arrived and what you are on, nothing more
+
 ### 1.0.3
 
 - the update screen owns the whole window while it is up, no panels peeking

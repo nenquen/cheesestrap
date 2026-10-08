@@ -53,35 +53,14 @@ impl CheeseApp {
     }
 
     fn handle_key(&mut self, code: KeyCode) {
-        // the update popup swallows input while it is up, so a stray keypress
-        // cannot land on the play button behind it
+        // an update is not optional, so the screen swallows everything and
+        // only accepts the one button
         if !self.app.updating && self.app.update.is_some() {
-            match code {
-                KeyCode::Left => {
-                    self.app.using_keyboard = true;
-                    self.app.notice_idx = 0;
-                    return;
-                }
-                KeyCode::Right => {
-                    self.app.using_keyboard = true;
-                    self.app.notice_idx = 1;
-                    return;
-                }
-                KeyCode::Enter => {
-                    self.app.using_keyboard = true;
-                    if self.app.notice_idx == 0 {
-                        self.app.apply_update();
-                    } else {
-                        self.app.dismiss_update();
-                    }
-                    return;
-                }
-                KeyCode::Esc => {
-                    self.app.dismiss_update();
-                    return;
-                }
-                _ => {}
+            if matches!(code, KeyCode::Enter | KeyCode::Char(' ')) {
+                self.app.using_keyboard = true;
+                self.app.apply_update();
             }
+            return;
         }
         if self.app.editing_args {
             match code {
@@ -210,14 +189,8 @@ impl CheeseApp {
                     self.handle_key(KeyCode::Enter);
                 }
             }
-            Some(HotAction::Notice(i)) => {
-                self.app.notice_idx = i;
-                if i == 0 {
-                    self.app.apply_update();
-                } else {
-                    self.app.dismiss_update();
-                    self.app.push_log("update skipped.".to_string());
-                }
+            Some(HotAction::Notice(_)) => {
+                self.app.apply_update();
             }
             None => {}
         }
@@ -348,7 +321,6 @@ impl eframe::App for CheeseApp {
                 return;
             }
         }
-        self.app.tick_notice();
         self.term
             .draw(|f| ui::draw(f, &mut self.app, &mut self.hot))
             .ok();

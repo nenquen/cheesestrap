@@ -19,7 +19,6 @@ pub fn current() -> &'static str {
 #[derive(Clone)]
 pub struct Release {
     pub version: String,
-    pub notes: String,
     pub asset_name: String,
     pub asset_url: String,
     pub size: u64,
@@ -104,7 +103,6 @@ pub fn check() -> Result<Option<Release>, String> {
         return Err("the release asset has no download url.".to_string());
     }
     let size = asset["size"].as_u64().unwrap_or(0);
-    let notes = v["body"].as_str().unwrap_or_default().trim().to_string();
     let version = match version_from_asset(&asset_name) {
         Some(v) => v,
         None => return Err("the release asset name has no version in it.".to_string()),
@@ -115,7 +113,6 @@ pub fn check() -> Result<Option<Release>, String> {
     }
     Ok(Some(Release {
         version,
-        notes,
         asset_name,
         asset_url,
         size,

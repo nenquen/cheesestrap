@@ -93,11 +93,8 @@ pub struct App {
     /// Set once the user said yes, drives the updating overlay.
     pub updating: bool,
     pub update_pct: u8,
-    pub notice_idx: usize,
     /// The notice box in grid cells, so egui can drop the logo into it.
     pub notice_rect: Option<(u16, u16, u16, u16)>,
-    /// Auto dismiss, so a popup nobody acts on goes away on its own.
-    pub notice_until: Option<std::time::Instant>,
     pub tx: Sender<WorkerMsg>,
     pub rx: Receiver<WorkerMsg>,
 }
@@ -133,9 +130,7 @@ impl App {
             update: None,
             updating: false,
             update_pct: 0,
-            notice_idx: 0,
             notice_rect: None,
-            notice_until: None,
             tx,
             rx,
         }
@@ -298,24 +293,6 @@ impl App {
             let r = crate::update::download(&release, &tx).map_err(|e| e);
             let _ = tx.send(WorkerMsg::UpdateDownloaded(r));
         });
-    }
-
-    pub fn dismiss_update(&mut self) {
-        self.update = None;
-        self.notice_until = None;
-    }
-
-    /// Called every frame, hides the popup once its time is up.
-    pub fn tick_notice(&mut self) {
-        if self.updating || self.update.is_none() {
-            return;
-        }
-        if let Some(t) = self.notice_until {
-            if std::time::Instant::now() >= t {
-                self.dismiss_update();
-                self.push_log("update notice dismissed.".to_string());
-            }
-        }
     }
 
     pub fn push_log(&mut self, line: impl Into<String>) {
@@ -507,11 +484,9 @@ impl App {
                         rel.version,
                         crate::update::current()
                     ));
+                    // no timeout, no skip: an available update is the only thing the user
+                // can do until it is installed
                     self.update = Some(rel);
-                    self.notice_idx = 0;
-                    // long enough to notice, short enough to not get in the way
-                    self.notice_until =
-                        Some(std::time::Instant::now() + std::time::Duration::from_secs(20));
                 }
                 WorkerMsg::UpdateCheck(Ok(None)) => {
                     self.push_log("cheesestrap is up to date.".to_string());
