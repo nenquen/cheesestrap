@@ -37,6 +37,10 @@ struct SavedSettings {
     /// unix seconds of the last successful github check
     #[serde(default)]
     checked_at: u64,
+    /// which build ran that check. an app that was just installed has a cache
+    /// written by the version it replaced, so this forces a fresh look.
+    #[serde(default)]
+    checked_for: String,
     /// what that check found, kept so an update still shows while offline or
     /// while github is rate limiting us
     #[serde(default)]
@@ -80,6 +84,7 @@ fn save_settings(app: &App) {
         logs_to_file: app.logs_to_file,
         show_hints: app.show_hints,
         checked_at: app.checked_at,
+        checked_for: app.checked_for.clone(),
         seen: app.seen.clone(),
     };
     if let Ok(text) = serde_json::to_string_pretty(&s) {
@@ -118,6 +123,7 @@ pub struct App {
     pub notice_rect: Option<(u16, u16, u16, u16)>,
     /// Update check cache, see `check_update` for why this exists.
     pub checked_at: u64,
+    pub checked_for: String,
     pub seen: Option<crate::update::Release>,
     pub tx: Sender<WorkerMsg>,
     pub rx: Receiver<WorkerMsg>,
@@ -126,6 +132,12 @@ pub struct App {
 impl App {
     pub fn new(tx: Sender<WorkerMsg>, rx: Receiver<WorkerMsg>) -> Self {
         let saved = load_saved();
+        // read everything off it before the struct literal moves it
+        let logs_to_file = saved.as_ref().map(|s| s.logs_to_file).unwrap_or(false);
+        let show_hints = saved.as_ref().map(|s| s.show_hints).unwrap_or(true);
+        let checked_at = saved.as_ref().map(|s| s.checked_at).unwrap_or(0);
+        let checked_for = saved.as_ref().map(|s| s.checked_for.clone()).unwrap_or_default();
+        let seen = saved.and_then(|s| s.seen);
         Self {
             focus: Focus::Menu,
             using_keyboard: false,
@@ -133,8 +145,8 @@ impl App {
             menu_idx: 0,
             action_idx: 0,
             settings_idx: 0,
-            logs_to_file: saved.as_ref().map(|s| s.logs_to_file).unwrap_or(false),
-            show_hints: saved.as_ref().map(|s| s.show_hints).unwrap_or(true),
+            logs_to_file,
+            show_hints,
             close_at: None,
             can_uninstall: roblox::has_clients(),
             webview_ok: matches!(roblox::webview2_state(), roblox::Webview2State::Ok(_)),
@@ -155,8 +167,9 @@ impl App {
             updating: false,
             update_pct: 0,
             notice_rect: None,
-            checked_at: saved.as_ref().map(|s| s.checked_at).unwrap_or(0),
-            seen: saved.and_then(|s| s.seen),
+            checked_at,
+            checked_for,
+            seen,
             tx,
             rx,
         }
@@ -308,7 +321,13 @@ impl App {
         // So the answer is cached on disk. A cached update is still shown, so
         // being offline or throttled never hides an update that is waiting.
         let now = unix_now();
-        let fresh = now.saturating_sub(self.checked_at) < CHECK_INTERVAL;
+        // A cache written by a different build is not ours to trust. Right
+        // after an update install the old settings file is still on disk, and
+        // honouring its timestamp meant a fresh install could sit on "up to
+        // date" without ever asking, which is exactly when an update is most
+        // likely waiting.
+        let mine = self.checked_for == crate::update::current();
+        let fresh = mine && now.saturating_sub(self.checked_at) < CHECK_INTERVAL;
         let pending = self
             .seen
             .clone()
@@ -549,12 +568,14 @@ impl App {
                 }
                 WorkerMsg::UpdateCheck(Ok(Some(rel))) => {
                     self.checked_at = unix_now();
+                    self.checked_for = crate::update::current().to_string();
                     self.seen = Some(rel.clone());
                     self.save();
                     self.offer_update(rel);
                 }
                 WorkerMsg::UpdateCheck(Ok(None)) => {
                     self.checked_at = unix_now();
+                    self.checked_for = crate::update::current().to_string();
                     self.seen = None;
                     self.save();
                     self.push_log("cheesestrap is up to date.".to_string());

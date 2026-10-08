@@ -55,6 +55,12 @@ notes come from the top entry of the changelog below.
 
 ## Changelog
 
+### 1.0.10
+
+- the update cache remembers which build wrote it, so an app that was just
+  installed always looks again instead of inheriting the previous version's
+  timestamp and reporting up to date without ever asking github
+
 ### 1.0.9
 
 - the update check is cached for six hours, github only allows 60 requests an
