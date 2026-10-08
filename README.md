@@ -1,4 +1,4 @@
-# Cheesestrap <img align="right" width="128" src="assets/branding/macncheese-256.png" alt="Cheesestrap logo" />
+### Cheesestrap <img align="right" width="128" src="assets/branding/macncheese-256.png" alt="Cheesestrap logo" />
 
 [![build](https://github.com/nenquen/cheesestrap/actions/workflows/build.yml/badge.svg)](https://github.com/nenquen/cheesestrap/actions/workflows/build.yml) [![license](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE)
 
