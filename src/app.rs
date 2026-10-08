@@ -354,8 +354,8 @@ impl App {
     fn offer_update(&mut self, rel: crate::update::Release) {
         self.push_log(format!(
             "cheesestrap {} is available, you have {}.",
-            rel.version,
-            crate::update::current()
+            crate::update::pretty(&rel.version),
+            crate::update::pretty(crate::update::current())
         ));
         self.update = Some(rel);
     }

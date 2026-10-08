@@ -35,7 +35,7 @@ jobs:
           $line = (Get-Content target\version.ini | Select-String '^Version=').Line
           if (-not $line) { throw "stamp wrote no version" }
           $v = $line.Split('=')[1].Trim()
-          if ($v -notmatch '^\d+\.\d+\.\d{8}\.\d{4}$') { throw "bad version stamp: $v" }
+          if ($v -notmatch '^\d{4}-\d{2}-\d{2}-\d{4}$') { throw "bad version stamp: $v" }
           "CHEESESTRAP_VERSION=$v" >> $env:GITHUB_ENV
           "version=$v"                   >> $env:GITHUB_OUTPUT
           "setup=Cheesestrap-Setup-$v-x64.exe" >> $env:GITHUB_OUTPUT

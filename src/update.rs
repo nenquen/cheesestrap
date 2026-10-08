@@ -38,8 +38,9 @@ pub struct Release {
     pub size: u64,
 }
 
-/// Numeric dotted compare, so 1.0.10 beats 1.0.9. A plain string compare
-/// gets that wrong and would never offer the update.
+/// Compares the number groups, so `2026-10-08-1415` beats `2026-10-07-0900`
+/// and also beats `2026-10-08-0900`. A plain string compare gets that wrong
+/// and would never offer the update.
 pub fn newer(candidate: &str, base: &str) -> bool {
     let parse = |s: &str| -> Vec<u64> {
         s.trim()
@@ -59,17 +60,41 @@ pub fn newer(candidate: &str, base: &str) -> bool {
     false
 }
 
-/// Pulls the version out of `Cheesestrap-Setup-1.2.3-x64.exe`. The tag itself
-/// is always just "release", so the asset name is what carries the number.
+/// `2026-10-08-1415` reads better as `2026-10-08 14:15`. Anything that is not
+/// a build stamp is passed through untouched, which covers the crate version a
+/// plain `cargo build` falls back to.
+pub fn pretty(version: &str) -> String {
+    let parts: Vec<&str> = version.split('-').collect();
+    if parts.len() != 4 {
+        return version.to_string();
+    }
+    let (Some(y), Some(m), Some(d), Some(hm)) = (
+        parts[0].parse::<u32>().ok(),
+        parts[1].parse::<u32>().ok(),
+        parts[2].parse::<u32>().ok(),
+        parts[3].get(..4),
+    ) else {
+        return version.to_string();
+    };
+    if parts[3].len() != 4 || !parts[3].chars().all(|c| c.is_ascii_digit()) {
+        return version.to_string();
+    }
+    format!("{y}-{m:02}-{d:02} {}:{}", &hm[..2], &hm[2..])
+}
+
+/// Pulls the version out of `Cheesestrap-Setup-2026-10-08-1415-x64.exe`. The
+/// tag itself is always just "release", so the asset name is what carries it.
 fn version_from_asset(name: &str) -> Option<String> {
     let rest = name.strip_prefix("Cheesestrap-Setup-")?;
     let rest = rest.strip_suffix(".exe")?;
     let rest = rest.strip_suffix("-x64").unwrap_or(rest);
-    if rest.is_empty() {
-        None
-    } else {
-        Some(rest.to_string())
+    let parts: Vec<&str> = rest.split('-').collect();
+    let looks_stamped = parts.len() == 4
+        && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+    if !looks_stamped {
+        return None;
     }
+    Some(rest.to_string())
 }
 
 /// `Ok(None)` means we are already on the newest release.
@@ -197,4 +222,46 @@ pub fn spawn_setup(setup: &Path) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("could not start the setup: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn later_builds_win() {
+        assert!(newer("2026-10-08-1415", "2026-10-07-2359"));
+        assert!(newer("2026-10-08-1415", "2026-10-08-0900"));
+        assert!(newer("2026-11-01-0000", "2026-10-31-2359"));
+        assert!(newer("2027-01-01-0000", "2026-12-31-2359"));
+        // same minute is not newer
+        assert!(!newer("2026-10-08-1415", "2026-10-08-1415"));
+        assert!(!newer("2026-10-08-0900", "2026-10-08-1415"));
+        // the day has to win over the time, this is the trap
+        assert!(newer("2026-10-09-0001", "2026-10-08-2359"));
+        // the crate version a plain cargo build falls back to still compares
+        assert!(newer("2026-10-08-1415", "1.0.0"));
+    }
+
+    #[test]
+    fn stamps_display_nicely() {
+        assert_eq!(pretty("2026-10-08-1415"), "2026-10-08 14:15");
+        assert_eq!(pretty("2026-01-02-0304"), "2026-01-02 03:04");
+        // anything that is not a stamp is left alone
+        assert_eq!(pretty("1.0.0"), "1.0.0");
+        assert_eq!(pretty(""), "");
+    }
+
+    #[test]
+    fn asset_name_carries_the_stamp() {
+        assert_eq!(
+            version_from_asset("Cheesestrap-Setup-2026-10-08-1415-x64.exe").as_deref(),
+            Some("2026-10-08-1415")
+        );
+        // the old hand written scheme is not a stamp, skip it rather than
+        // treating "1.0.10" as a version from the year 1
+        assert!(version_from_asset("Cheesestrap-Setup-1.0.10-x64.exe").is_none());
+        assert!(version_from_asset("cheesestrap notes.txt").is_none());
+        assert!(version_from_asset("Cheesestrap-Setup-x64.exe").is_none());
+    }
 }

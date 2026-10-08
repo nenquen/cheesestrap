@@ -31,7 +31,7 @@ Needs Inno Setup 6.
 cd installer
 powershell -ExecutionPolicy Bypass -File make-wizard-art.ps1
 powershell -ExecutionPolicy Bypass -File stamp-version.ps1
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp /DMyAppVersion=1.0.20261008.1400 Cheesestrap.iss
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp /DMyAppVersion=2026-10-08-1436 Cheesestrap.iss
 ```
 
 `make-wizard-art.ps1` regenerates `wizard.bmp` and `wizard-small.bmp` from the
@@ -57,15 +57,17 @@ notes come from the top entry of the changelog below.
 
 ## Changelog
 
-Versions are the moment the build happened, `1.0.YYYYMMDD.HHMM` in UTC. Nothing
-to bump, every build is its own version and the update check just compares the
-numbers.
+Versions are the moment the build happened, `2026-10-08-1436` in UTC, shown
+inside the app as `2026-10-08 14:36`. Nothing to bump, every build is its own
+version and the update check just compares the numbers.
 
 ### date based versions
 
-- the version is stamped at build time, `installer\stamp-version.ps1` writes
-  `target\version.ini` and the inno script and the binary both read it, so
-  there is no hand written number left anywhere
+- the version is the build time, no hand written number is left anywhere.
+  `installer\stamp-version.ps1` computes it and the inno script and the binary
+  both get it from there
+- unit tests cover the comparison, the display format and pulling the stamp out
+  of the setup file name
 - release notes take the newest changelog entry instead of matching a version,
   since the version is not known until the build starts
 - the update cache records which build wrote it, so an app that was just

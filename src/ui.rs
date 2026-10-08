@@ -62,7 +62,7 @@ fn status_lines(app: &App) -> Vec<Line<'_>> {
         Line::from(vec![
             Span::styled("cheesestrap: ", Style::default().fg(DIM)),
             Span::styled(
-                crate::update::current(),
+                crate::update::pretty(crate::update::current()),
                 Style::default().fg(CREAM).add_modifier(Modifier::BOLD),
             ),
         ]),
@@ -102,7 +102,7 @@ pub fn draw(f: &mut Frame, app: &mut App, hot: &mut Vec<HotZone>) {
 
         f.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                format!("  v{} tab: panel   up/down: move   enter: go   esc: back", crate::update::current()),
+                format!("  v{} tab: panel   up/down: move   enter: go   esc: back", crate::update::pretty(crate::update::current())),
                 Style::default().fg(DIM),
             )])),
             rows[1],
@@ -162,11 +162,17 @@ fn draw_notice(
 
     let rel = app.update.as_ref().expect("checked above");
     lines.push(Line::from(vec![Span::styled(
-        format!("  cheesestrap {} is ready.", rel.version),
+        format!(
+            "  cheesestrap {} is ready.",
+            crate::update::pretty(&rel.version)
+        ),
         Style::default().fg(CHEESE).add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::from(vec![Span::styled(
-        format!("  you are running {}.", crate::update::current()),
+        format!(
+            "  you are running {}.",
+            crate::update::pretty(crate::update::current())
+        ),
         Style::default().fg(CREAM),
     )]));
     lines.push(Line::from(""));
