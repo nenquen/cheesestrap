@@ -70,7 +70,7 @@ jobs:
       - name: Build the setup exe
         shell: pwsh
         run: |
-          & $env:ISCC /Qp "/DMyAppVersion=$env:CHEESESTRAP_VERSION" "installer\Cheesestrap.iss"
+          & $env:ISCC_EXE /Qp "/DMyAppVersion=$env:CHEESESTRAP_VERSION" "installer\Cheesestrap.iss"
 
       # The version names itself, so this only trips when the tag was pushed
       # twice inside one minute. Refuse rather than overwrite.
