@@ -55,6 +55,10 @@ notes come from the top entry of the changelog below.
 
 ## Changelog
 
+### 1.0.7
+
+- the status box shows the running cheesestrap version
+
 ### 1.0.6
 
 - cleanup pass, no behaviour change

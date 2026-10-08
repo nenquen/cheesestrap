@@ -60,11 +60,18 @@ fn status_lines(app: &App) -> Vec<Line<'_>> {
     let latest = app.latest.as_deref().unwrap_or("...");
     vec![
         Line::from(vec![
-            Span::styled("installed: ", Style::default().fg(DIM)),
+            Span::styled("cheesestrap: ", Style::default().fg(DIM)),
+            Span::styled(
+                crate::update::current(),
+                Style::default().fg(CREAM).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("installed:   ", Style::default().fg(DIM)),
             Span::styled(installed, Style::default().fg(GOOD)),
         ]),
         Line::from(vec![
-            Span::styled("latest:    ", Style::default().fg(DIM)),
+            Span::styled("latest:      ", Style::default().fg(DIM)),
             Span::styled(latest, Style::default().fg(CHEESE)),
         ]),
     ]
@@ -232,7 +239,8 @@ fn draw_main(
     }
 
     let mut cons = vec![
-        Constraint::Length(4),
+        // two border rows plus the three lines status_lines renders
+        Constraint::Length(5),
         Constraint::Min(0),
     ];
     cons.push(Constraint::Length(3));

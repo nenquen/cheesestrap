@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "cheesestrap"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "crossterm",
  "dirs",
