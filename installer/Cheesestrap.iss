@@ -1,7 +1,8 @@
 ; Cheesestrap installer. Build with: iscc installer\Cheesestrap.iss
 
 #define MyAppName "cheesestrap"
-#define MyAppVersion "1.0.0"
+; keep this in sync with Cargo.toml, they are bumped together
+#define MyAppVersion "1.0.1"
 #define MyAppExe "Cheesestrap.exe"
 
 [Setup]
@@ -13,7 +14,7 @@ DefaultDirName={autopf}\Cheesestrap
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 OutputDir=output
-OutputBaseFilename=Cheesestrap-Setup-1.0.0-x64
+OutputBaseFilename=Cheesestrap-Setup-{#MyAppVersion}-x64
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

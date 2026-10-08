@@ -9,7 +9,7 @@ use crate::app::WorkerMsg;
 const VERSION_API: &str =
     "https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer";
 const SETUP_CDN: &str = "https://setup.rbxcdn.com";
-const USER_AGENT: &str = "Cheesestrap/1.0.0";
+const USER_AGENT: &str = concat!("Cheesestrap/", env!("CARGO_PKG_VERSION"));
 
 const APP_SETTINGS: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Settings>\r\n\t<ContentFolder>content</ContentFolder>\r\n\t<BaseUrl>http://www.roblox.com</BaseUrl>\r\n</Settings>\r\n";
 
